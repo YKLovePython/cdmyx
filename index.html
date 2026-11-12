@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BMPT — 试验场</title>
+<script async src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"
+        onerror="var _s=document.createElement('script');_s.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';document.head.appendChild(_s)"></script>
+<style>
+  :root{color-scheme:dark}
+  html,body{height:100%;margin:0;background:#0a0908;overflow:hidden;user-select:none}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:none}
+
+  /* ---- 瞄准圈：你要打的世界落点 ---- */
+  #aim{position:fixed;left:0;top:0;width:24px;height:24px;pointer-events:none;
+       will-change:transform;z-index:4;transition:opacity .12s}
+  #aim::before{content:"";position:absolute;inset:0;border:1px solid rgba(255,243,224,.9);
+       border-radius:50%;box-shadow:0 0 7px rgba(0,0,0,.55)}
+  #aim::after{content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px 0 0 -1.5px;
+       background:rgba(255,247,232,.95);border-radius:50%}
+
+  /* ---- 炮管圈：炮弹实际落点 ---- */
+  #gun{position:fixed;left:0;top:0;width:36px;height:36px;pointer-events:none;display:none;
+       will-change:transform;z-index:4}
+  #gun::before{content:"";position:absolute;inset:0;border:1.5px solid rgba(150,240,255,.85);
+       border-radius:50%;box-shadow:0 0 8px rgba(110,210,255,.5),inset 0 0 8px rgba(110,210,255,.16)}
+  #gun::after{content:"";position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;
+       background:rgba(200,250,255,.95);border-radius:50%;box-shadow:0 0 9px rgba(150,240,255,.9)}
+  #gun.lock::before{border-color:rgba(255,132,96,.95);
+       box-shadow:0 0 12px rgba(255,110,70,.65),inset 0 0 8px rgba(255,110,70,.2)}
+  #gun.lock::after{background:#ffb59c;box-shadow:0 0 10px rgba(255,130,90,.95)}
+
+  #range{position:fixed;left:0;top:0;display:none;pointer-events:none;
+       font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.10em;
+       color:rgba(180,242,255,.92);text-shadow:0 0 6px rgba(0,0,0,.95);white-space:nowrap;z-index:4}
+
+  /* ---- 命中标记 ---- */
+  #hitmark{position:fixed;left:50%;top:50%;width:30px;height:30px;pointer-events:none;opacity:0;
+       will-change:transform,opacity;z-index:5}
+  #hitmark::before,#hitmark::after{content:"";position:absolute;left:50%;top:50%;
+       width:30px;height:2px;margin:-1px 0 0 -15px;
+       background:linear-gradient(90deg,#ffd9a0 0 24%,transparent 24% 76%,#ffd9a0 76% 100%)}
+  #hitmark::before{transform:rotate(45deg)}
+  #hitmark::after{transform:rotate(-45deg)}
+
+  /* ---- 击杀提示 ---- */
+  #feed{position:fixed;left:50%;top:76px;transform:translateX(-50%);text-align:center;pointer-events:none;
+       font:12px/1.95 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;
+       color:#ffcf8a;text-shadow:0 0 9px rgba(0,0,0,.95);z-index:5}
+
+  /* ---- 指针锁定提示 ---- */
+  #lockhint{position:fixed;left:50%;bottom:15%;transform:translateX(-50%);pointer-events:none;
+       font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;
+       color:rgba(255,196,120,.92);text-shadow:0 0 9px rgba(0,0,0,.95);z-index:5;
+       transition:opacity .25s;white-space:nowrap}
+
+  /* ---- 左下角状态 ---- */
+  #hud{position:fixed;left:18px;bottom:16px;font:11px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;
+       letter-spacing:.09em;color:rgba(232,226,212,.5);text-transform:uppercase;pointer-events:none;
+       padding-left:11px;border-left:2px solid rgba(255,176,84,.75);z-index:5}
+  #hud b{color:#efe9dc;font-weight:600}
+  #hud i{color:#ffb054;font-style:normal}
+  #hud #hpline{color:rgba(232,226,212,.62)}
+  #hud #hpbar{display:inline-block;width:84px;height:5px;background:rgba(255,255,255,.12);
+       vertical-align:middle;margin:0 6px;overflow:hidden}
+  #hud #hpbar b{display:block;height:100%;width:100%;background:#8fe39a;transition:width .12s,background .2s}
+  #hud #hpline.low #hpbar b{background:#ff7a5c}
+
+  /* ---- 联机：受伤红框 / 阵亡提示 ---- */
+  #dmg{position:fixed;inset:0;z-index:6;pointer-events:none;opacity:0;
+       background:radial-gradient(ellipse at center,rgba(120,0,0,0) 40%,rgba(200,28,12,.62) 100%);
+       transition:opacity .10s}
+  #deadmsg{position:fixed;left:50%;top:42%;transform:translate(-50%,-50%);z-index:8;
+       pointer-events:none;text-align:center;font:12px/1.8 ui-monospace,SFMono-Regular,Menlo,monospace;
+       letter-spacing:.22em;color:#ffcdbc;text-shadow:0 0 18px rgba(255,70,40,.7);display:none;white-space:nowrap}
+  #deadmsg b{display:block;font-size:20px;letter-spacing:.32em;color:#ff8f74;margin-bottom:4px}
+
+  #bench{position:fixed;right:12px;top:12px;display:none;white-space:pre;font:11px/1.6 ui-monospace,monospace;
+         color:#cfe3ff;background:rgba(6,10,16,.72);padding:8px 10px;border:1px solid rgba(120,160,210,.35);
+         user-select:none;z-index:6}
+  #fatal{position:fixed;left:0;right:0;bottom:0;max-height:46%;overflow:auto;display:none;white-space:pre-wrap;
+         font:12px/1.45 ui-monospace,monospace;color:#ffb4a8;background:rgba(40,8,4,.92);padding:10px 14px;z-index:40}
+
+  /* ================= 启动载入画面 ================= */
+  /*  放在车库之前，脚本再大也是先看到这里，不会黑屏。
+      未执行 JS 时是来回扫的 indeterminate 条，执行后切成真实百分比。   */
+  #boot{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;
+        background:#070605;transition:opacity .38s}
+  #boot.hide{opacity:0;pointer-events:none}
+  #bootBox{width:min(440px,78vw);font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+           letter-spacing:.14em;color:#e7e0d2;text-align:center}
+  #bootTitle{font-size:17px;letter-spacing:.30em;color:#ffb054}
+  #bootTitle b{font-weight:600;color:#ffb054}
+  #bootTitle span{font-size:10px;letter-spacing:.20em;color:rgba(231,224,210,.42)}
+  #bootSub{margin-top:9px;font-size:10.5px;color:rgba(231,224,210,.5);min-height:1.7em}
+  #bootTrack{position:relative;margin-top:13px;height:3px;background:rgba(255,255,255,.10);overflow:hidden}
+  #bootFill{position:absolute;left:0;top:0;bottom:0;width:0%;background:linear-gradient(90deg,#ffb054,#ffe0a8);
+            transition:width .18s}
+  #bootScan{position:absolute;left:0;top:0;bottom:0;width:32%;
+            background:linear-gradient(90deg,transparent,rgba(255,176,84,.6),transparent);
+            animation:bootscan 1.15s linear infinite}
+  @keyframes bootscan{from{transform:translateX(-110%)}to{transform:translateX(330%)}}
+  #bootPct{margin-top:8px;font-size:10px;color:rgba(255,176,84,.8);letter-spacing:.18em}
+
+  /* ================= 车库 / 选车界面 ================= */
+  #garage{position:fixed;inset:0;z-index:20;display:flex;align-items:center;
+          --nc:#ffb054;
+          background:
+            linear-gradient(90deg,rgba(5,4,3,.96) 0%,rgba(5,4,3,.93) 30%,rgba(5,4,3,.60) 50%,rgba(5,4,3,0) 74%),
+            repeating-linear-gradient(0deg, rgba(255,255,255,.02) 0 1px, transparent 1px 3px);
+          font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+          color:#e7e0d2;transition:opacity .32s;cursor:default}
+  #garage.hide{opacity:0;pointer-events:none}
+  #gwrap{width:min(600px,46vw);margin-left:max(22px,4vw);max-height:92vh;
+         display:flex;flex-direction:column;gap:13px;overflow:auto}
+  #ghead{padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,.12)}
+  #gkicker{font-size:10px;letter-spacing:.30em;color:var(--nc);text-transform:uppercase}
+  #ghead h1{margin:4px 0 0;font-size:clamp(20px,2.2vw,28px);letter-spacing:.14em;font-weight:600;color:#f4ecdc}
+  #gsub{margin-top:6px;font-size:10.5px;letter-spacing:.10em;color:rgba(231,224,210,.5)}
+
+  /* ---- 国家阵营 Tab ---- */
+  #gnations{display:flex;gap:6px;margin-top:11px;flex-wrap:wrap}
+  .gnat{position:relative;display:flex;align-items:baseline;gap:6px;padding:6px 11px 5px;
+        background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.10);
+        border-bottom:2px solid transparent;color:rgba(231,224,210,.52);
+        font:inherit;font-size:10.5px;letter-spacing:.14em;cursor:pointer;
+        transition:background .15s,color .15s,border-color .15s}
+  .gnat b{font-size:11px;letter-spacing:.18em;color:rgba(231,224,210,.70);font-weight:600}
+  .gnat span{font-size:10px}
+  .gnat i{font-style:normal;font-size:9px;color:rgba(231,224,210,.32)}
+  .gnat:hover{background:rgba(255,255,255,.07);color:#e7e0d2}
+  .gnat.sel{background:rgba(255,255,255,.08);border-bottom-color:var(--nc);color:#f4ecdc}
+  .gnat.sel b{color:var(--nc)}
+
+  #grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+  @media (max-width:1000px){
+    #garage{background:rgba(5,4,3,.94);justify-content:center}
+    #gwrap{width:auto;margin:0 16px;max-width:860px}
+    #grid{grid-template-columns:repeat(3,1fr)}
+  }
+  @media (max-width:640px){#grid{grid-template-columns:repeat(2,1fr)}}
+  .vcard{position:relative;text-align:left;padding:12px 13px 11px;border:1px solid rgba(255,255,255,.10);
+         background:linear-gradient(160deg,rgba(26,24,21,.94),rgba(13,12,11,.94));
+         color:inherit;font:inherit;cursor:pointer;transition:border-color .15s,transform .12s,background .15s;
+         clip-path:polygon(0 0,100% 0,100% calc(100% - 11px),calc(100% - 11px) 100%,0 100%)}
+  .vcard:hover{border-color:var(--nc);transform:translateY(-2px)}
+  .vcard.sel{border-color:var(--nc);background:linear-gradient(160deg,rgba(52,44,32,.96),rgba(18,16,13,.96));
+             box-shadow:inset 0 0 0 1px var(--nc),0 0 24px rgba(0,0,0,.45)}
+  .vcard .vtag{position:absolute;right:10px;top:9px;font-size:9px;letter-spacing:.18em;
+               color:var(--nc);opacity:.8;text-transform:uppercase}
+  .vcard .vname{font-size:17px;letter-spacing:.10em;font-weight:600;color:#f6efe1}
+  .vcard .vfull{font-size:10px;letter-spacing:.10em;color:rgba(231,224,210,.45);margin-top:1px}
+  .vcard .vmeta{display:flex;gap:5px;margin-top:5px}
+  .vcard .vmeta em{font-style:normal;font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;
+                   padding:1px 5px;border:1px solid rgba(255,255,255,.14);color:rgba(231,224,210,.48)}
+  .vcard .vmeta em.rl{color:var(--nc);border-color:currentColor;opacity:.85}
+  .vcard .vwpn{font-size:11px;letter-spacing:.05em;color:var(--nc);margin-top:6px}
+  .vcard .vdesc{font-size:10.5px;line-height:1.5;color:rgba(231,224,210,.55);margin-top:4px;min-height:2.6em}
+  .vcard .vstats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px}
+  .vstat{font-size:9px;letter-spacing:.10em;color:rgba(231,224,210,.42);text-transform:uppercase}
+  .vstat i{display:block;height:3px;margin-top:3px;background:rgba(255,255,255,.10);position:relative;overflow:hidden}
+  .vstat i b{position:absolute;left:0;top:0;bottom:0;background:var(--nc);border-radius:2px}
+  #gfoot{display:flex;align-items:center;gap:14px;padding-top:4px;flex-wrap:wrap}
+  #ginfo{flex:1 1 100%;min-width:0}
+  #gname{display:block;font-size:14px;letter-spacing:.12em;color:#f4ecdc}
+  #gdesc{display:block;font-size:11px;letter-spacing:.06em;color:rgba(231,224,210,.5);margin-top:2px}
+  #gbar{width:150px;height:2px;background:rgba(255,255,255,.10);overflow:hidden;flex:none}
+  #gbar i{display:block;height:100%;width:0%;background:var(--nc);transition:width .2s}
+  #gload{flex:none;min-width:72px;text-align:right;font-size:10px;letter-spacing:.10em;color:var(--nc);opacity:.8}
+  #go,#netEnter{margin-left:auto;flex:none;padding:11px 22px;font:inherit;font-size:12px;letter-spacing:.18em;
+      text-transform:uppercase;color:#1a1206;background:linear-gradient(180deg,#ffc067,#f09b32);border:0;cursor:pointer;
+      clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
+      transition:filter .15s,transform .12s}
+  #go:hover,#netEnter:hover{filter:brightness(1.1);transform:translateY(-1px)}
+  #go:active,#netEnter:active{transform:translateY(0)}
+  #go:disabled{opacity:.4;cursor:default;filter:none;transform:none}
+  #goNet{flex:none;padding:10px 16px;font:inherit;font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;
+      color:#ffcf8a;background:rgba(255,176,84,.08);border:1px solid rgba(255,176,84,.5);cursor:pointer;
+      clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);
+      transition:background .15s,color .15s,border-color .15s}
+  #goNet:hover{background:rgba(255,176,84,.20);color:#ffe6c2}
+  #goNet.on{background:rgba(255,176,84,.24);border-color:var(--nc);color:#ffe6c2}
+
+  /* ================= 联机大厅（车库底部展开） ================= */
+  #netlobby{display:flex;flex-direction:column;gap:8px;padding:10px 0 2px;
+            border-top:1px solid rgba(255,255,255,.08)}
+  #netlobby[hidden]{display:none}
+  #netForm{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  #netForm[hidden]{display:none}
+  #netlobby .nlabel{font-size:9.5px;letter-spacing:.28em;color:rgba(231,224,210,.42);text-transform:uppercase}
+  #netlobby input{background:rgba(0,0,0,.42);border:1px solid rgba(255,255,255,.13);color:#e7e0d2;
+                  font:inherit;font-size:11px;letter-spacing:.08em;padding:5px 8px;width:92px;outline:none}
+  #netlobby input:focus{border-color:var(--nc)}
+  #netlobby input:disabled{opacity:.45}
+  #netlobby button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#e7e0d2;
+                   font:inherit;font-size:10.5px;letter-spacing:.14em;padding:5px 10px;cursor:pointer;
+                   transition:background .15s,border-color .15s,color .15s}
+  #netlobby button:hover:enabled{background:rgba(255,176,84,.16);border-color:var(--nc);color:#ffe6c2}
+  #netlobby button:disabled{opacity:.38;cursor:default}
+  #netlobby .nlsep{width:1px;height:18px;background:rgba(255,255,255,.12);margin:0 3px}
+  #netlobby .nlhint{font-size:9.5px;letter-spacing:.06em;color:rgba(231,224,210,.34)}
+  #netRoom{display:flex;flex-direction:column;gap:7px}
+  #netRoom[hidden]{display:none}
+  .nroomline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:10.5px;
+             letter-spacing:.10em;color:rgba(231,224,210,.6)}
+  #netlobby code{font:inherit;letter-spacing:.24em;color:#ffd9a0;font-size:12px}
+  #netRole{font-size:9.5px;letter-spacing:.14em;color:var(--nc);text-transform:uppercase}
+  #netlobby .nmini{background:none;border:1px solid rgba(255,176,84,.45);color:#ffc98a;font:inherit;
+                   font-size:9.5px;letter-spacing:.10em;padding:3px 7px;cursor:pointer}
+  #netlobby .nmini:hover{background:rgba(255,176,84,.15)}
+  #netStatus{font-size:10px;letter-spacing:.08em;color:rgba(231,224,210,.5)}
+  #netHint{font-size:9.5px;letter-spacing:.06em;color:rgba(231,224,210,.32)}
+  #netHint[hidden]{display:none}
+  #roster{display:flex;flex-wrap:wrap;gap:6px;margin:1px 0}
+  #roster[hidden]{display:none}
+  #roster .np{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
+              border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);
+              font-size:10.5px;letter-spacing:.08em;color:rgba(231,224,210,.7)}
+  #roster .np i{font-style:normal;font-size:9px;color:#0d0b09;background:var(--sc,#ffb054);
+                padding:0 4px;border-radius:2px;font-weight:700}
+  #roster .np u{text-decoration:none;font-style:normal;font-size:9.5px;color:#9fe0a6;margin-left:2px}
+  #roster .np em{font-style:normal;font-size:9.5px;color:rgba(231,224,210,.42)}
+  #roster .np.dead{opacity:.42}
+  #roster .np.dead u{color:#ff8d74}
+  #roster .np.me{border-color:var(--sc,#ffb054)}
+
+  /* 游戏中右上角的房间信息 */
+  #netgame{position:fixed;right:14px;top:12px;z-index:6;pointer-events:none;
+           font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.10em;
+           color:rgba(232,226,212,.72);background:rgba(6,7,9,.52);border:1px solid rgba(255,255,255,.10);
+           padding:7px 10px;min-width:132px}
+  #netgame[hidden]{display:none}
+  #netgame b{display:block;color:#ffcf8a;font-weight:600;font-size:10px;letter-spacing:.18em;margin-bottom:3px}
+  #netgame .ngrow i{font-style:normal;font-size:9px;color:#0d0b09;background:var(--sc,#ffb054);
+                    padding:0 3px;margin-right:5px;border-radius:2px;font-weight:700}
+  #netgame .ngrow em{font-style:normal;color:rgba(232,226,212,.38);margin-left:5px;font-size:9px}
+  #netgame .ngrow s{text-decoration:none;color:rgba(232,226,212,.5);font-size:9px;margin-left:5px}
+  #netgame .ngrow.dead{opacity:.42}
+  #netgame .ngrow.me{color:#ffe6c2}
+
+  /* ---- 触屏操控（只在游戏进行中显示；桌面端不创建 DOM） ---- */
+  body.touch{overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+  body.touch #hud{top:14px;bottom:auto;left:12px;font-size:9.5px;line-height:1.55;
+                  padding-left:9px;z-index:8}
+  #touch{display:none}
+  body.playing.touch #touch{display:block}
+  #tstick{position:fixed;left:24px;bottom:26px;width:136px;height:136px;border-radius:50%;
+          background:radial-gradient(circle at 50% 50%,rgba(255,255,255,.05),rgba(0,0,0,.30) 72%);
+          border:1px solid rgba(255,255,255,.16);touch-action:none;z-index:8}
+  #tstick::before{content:"";position:absolute;inset:41px;border-radius:50%;
+          border:1px solid rgba(255,255,255,.10)}
+  #tknob{position:absolute;left:50%;top:50%;width:58px;height:58px;margin:-29px 0 0 -29px;
+         border-radius:50%;background:rgba(255,176,84,.20);border:1.5px solid rgba(255,196,120,.66);
+         box-shadow:0 0 14px rgba(255,150,60,.25);will-change:transform}
+  .tbtn{position:fixed;display:flex;align-items:center;justify-content:center;border-radius:50%;
+        font:600 11px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;
+        color:rgba(255,240,220,.90);background:rgba(10,11,13,.34);
+        border:1px solid rgba(255,255,255,.20);touch-action:none;z-index:8;text-align:center}
+  .tbtn.on{background:rgba(255,176,84,.26);border-color:rgba(255,196,120,.85);color:#fff2dd}
+  #tfire{right:24px;bottom:26px;width:96px;height:96px;font-size:13px;
+         border-color:rgba(255,140,90,.5);background:rgba(120,30,10,.32)}
+  #tfire.on{background:rgba(255,110,60,.44);border-color:rgba(255,160,110,.95)}
+  #taim{right:38px;bottom:140px;width:66px;height:66px}
+  #tfree{right:132px;bottom:30px;width:58px;height:58px;font-size:10px}
+  #tcrF{right:132px;bottom:100px;width:58px;height:58px;font-size:10px}
+  #tcrR{right:132px;bottom:170px;width:58px;height:58px;font-size:10px}
+  #tchint{position:fixed;left:50%;bottom:246px;transform:translateX(-50%);pointer-events:none;
+          font:10px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.10em;
+          color:rgba(255,220,180,.78);text-shadow:0 0 8px rgba(0,0,0,.9);z-index:8;
+          transition:opacity .6s;white-space:nowrap}
+  #trot{display:none;position:fixed;left:50%;top:44%;transform:translate(-50%,-50%);
+        padding:10px 14px;background:rgba(8,9,11,.88);border:1px solid rgba(255,176,84,.5);
+        color:#ffd9a0;font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+        letter-spacing:.12em;z-index:9;pointer-events:none}
+  @media (orientation:portrait){ body.playing.touch #trot{display:block} }
+  @media (max-width:560px){
+    #tstick{left:16px;bottom:18px;width:118px;height:118px}
+    #tstick::before{inset:36px}
+    #tfire{right:16px;bottom:18px;width:86px;height:86px}
+    #taim{right:26px;bottom:120px;width:60px;height:60px}
+    #tfree{right:114px;bottom:22px;width:52px;height:52px}
+    #tcrF{right:114px;bottom:84px;width:52px;height:52px}
+    #tcrR{right:114px;bottom:146px;width:52px;height:52px}
+    #tchint{bottom:214px;font-size:9px}
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="aim"></div>
+<div id="gun"></div>
+<div id="range"></div>
+<div id="hitmark"></div>
+<div id="dmg"></div>
+<div id="deadmsg"></div>
+<div id="feed"></div>
+<div id="lockhint" style="opacity:0">点击画面锁定鼠标 · Esc 释放</div>
+
+<div id="hud">
+  <b id="vhname">BMPT</b> <span id="vhwpn">· 30mm ×2</span> · 荒漠试验场<br>
+  <i id="spd">0.0</i> km/h &nbsp; 炮塔 <i id="ty">0</i>° &nbsp; 火炮 <i id="gp">0</i>°<br>
+  弹药 <i id="ammo">320 发</i> &nbsp; 靶标 <i id="kills">0</i> &nbsp; 巡航 <i id="cruise">关</i><br>
+  <span id="hpline" hidden>装甲 <span id="hpbar"><b id="hpfill"></b></span> <i id="hpnum">0</i> &nbsp; 得分 <i id="score">0</i><br></span>
+  <span id="kbdhelp">W/S 油门 · A/D 转向 · 鼠标 瞄准 · 左键 开火 · Shift/右键 炮镜<br>
+  E/Q 巡航 前进/倒车（三档）· 按住 C 自由视角</span><br>
+  <span id="tload" style="color:rgba(255,176,84,.8)"></span>
+</div>
+<div id="bench"></div>
+<div id="fatal"></div>
+
+<div id="netgame" hidden>
+  <b id="ngTitle">房间 —</b>
+  <div id="ngList"></div>
+</div>
+
+<div id="boot">
+  <div id="bootBox">
+    <div id="bootTitle"><b id="bootName">BMPT</b> <span>· 荒漠试验场</span></div>
+    <div id="bootSub">正在解析载具数据…</div>
+    <div id="bootTrack"><i id="bootFill"></i><b id="bootScan"></b></div>
+    <div id="bootPct">0%</div>
+  </div>
+</div>
+
+<div id="garage">
+  <div id="gwrap">
+    <div id="ghead">
+      <div id="gkicker">Combat Test Range · 载具选择</div>
+      <h1>选择你的载具</h1>
+      <div id="gnations"></div>
+      <div id="gsub">Q / E 换阵营 · A / D 换车 · 回车单机测试</div>
+    </div>
+    <div id="grid"></div>
+    <div id="gfoot">
+      <div id="ginfo">
+        <b id="gname">—</b>
+        <span id="gdesc"></span>
+      </div>
+      <div id="gbar"><i></i></div>
+      <div id="gload">贴图 0%</div>
+      <button id="go">单机测试</button>
+      <button id="goNet" type="button">联机测试</button>
+      <button id="netEnter" type="button" hidden>进入联机场地</button>
+    </div>
+
+    <div id="netlobby" hidden>
+      <div id="netForm">
+        <span class="nlabel">联机</span>
+        <input id="netName" maxlength="10" value="车长" title="你的名字">
+        <button id="netCreate" type="button">创建房间</button>
+        <span class="nlsep"></span>
+        <input id="netCode" maxlength="8" placeholder="房间码">
+        <button id="netJoin" type="button">加入</button>
+        <button id="netBack" type="button">收起</button>
+      </div>
+      <div id="netRoom" hidden>
+        <div class="nroomline">
+          <span class="nlabel">房间</span>
+          <code id="netRoomCode">—</code>
+          <span id="netRole">—</span>
+          <button class="nmini" type="button" data-copy="code">复制房间码</button>
+          <button class="nmini" type="button" data-copy="link">复制链接</button>
+        </div>
+        <div id="roster"></div>
+        <div class="nroomline">
+          <button id="netLeave" type="button">离开房间</button>
+          <span class="nlhint">准备好后点「进入联机场地」开始同步</span>
+        </div>
+      </div>
+      <div id="netStatus">单机模式</div>
+      <div id="netHint">联机走 PeerJS 公共信令 + P2P · 房间码 5 位 · 最多 4 人 · 射击 / HP / 得分已同步 · 击毁后 4 秒重生 · 房主退出即解散 · 建议 http 打开</div>
+    </div>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
