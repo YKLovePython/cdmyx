@@ -2658,7 +2658,19 @@ function modelPartMat(part, P, mats, travelL, travelR){
     if(!w) return mats.vehM;
     const travel = w.side > 0 ? travelL : travelR;
     const ang = travel / Math.max(w.r, 0.05);   // 前进 = 绕 +X 正向转
-    return M4.mul(M4.mul(mats.vehM, M4.translate(w.c[0], w.c[1], w.c[2])), M4.rotX(ang));
+    /* 视觉悬挂行程：轮子按脚下地形上下走，车体不再像一整块铁。
+       竖直射线到地面的高度差就是这一侧车轮该伸缩的量（托带轮不参与）。 */
+    let dy = 0;
+    if(w.r >= 0.15){
+      const vm = mats.vehM;
+      const wx = vm[0]*w.c[0] + vm[4]*w.c[1] + vm[8]*w.c[2] + vm[12];
+      const wy = vm[1]*w.c[0] + vm[5]*w.c[1] + vm[9]*w.c[2] + vm[13];
+      const wz = vm[2]*w.c[0] + vm[6]*w.c[1] + vm[10]*w.c[2] + vm[14];
+      /* 目标：轮心在「当地地面 + 模型原始轮心高度」；差值就是这一根悬挂的行程 */
+      dy = (groundH(wx, wz) + w.c[1]) - wy;
+      if(dy > 0.13) dy = 0.13; else if(dy < -0.13) dy = -0.13;
+    }
+    return M4.mul(M4.mul(mats.vehM, M4.translate(w.c[0], w.c[1] + dy, w.c[2])), M4.rotX(ang));
   }
   return mats.vehM;                             // hull / trackL / trackR
 }
@@ -6268,56 +6280,68 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
 })();
 
 /* ===================== 69_physics.js ===================== */
-/* ============================ 车辆物理：刚体 + 射线悬挂 ============================ */
-/*  以前的车是「位置 + 偏航 + 速度」直接摆，贴地、无质量、不会腾空。
-    这里换成一套真正的受力模拟：
-      · 车体有质量、惯性、重力，位置/速度按 F=ma 积分
-      · 姿态 yaw / pitch / roll 也有角速度，由接触点力矩驱动（不是视觉弹簧）
-      · 4 个负重轮位置向下打射线，弹簧 + 阻尼把车撑在地面上
-      · 左右履带分别给驱动 / 制动 / 滚阻力，受附着力 (μN) 限制
-      · 横向摩擦阻止侧滑，转弯时车体自然外倾、刹车时自然点头
-      · 上坡、下坡、过坎、从平台冲出去腾空落地，全靠同一套力
-    渲染仍然用 car.pos / car.yaw / car.pitch / car.roll，所以 80_render 不用改。
+/* ============================ 车辆物理：刚体 + 多轮射线悬挂 ============================ */
+/*  参考的公开实现（都是同一套思路，只是调参不同）：
+       · Bullet btRaycastVehicle —— 每个轮一条射线，弹簧+阻尼，力加在接地点
+       · Very Very Valet 的 raycast car —— F = 压缩量*k - 弹簧速度*阻尼
+       · RuanLucasGD/Simple-Militay-Tank-Physics —— 每个负重轮单独悬挂
+       · Gaffer "Fix Your Timestep!" —— 固定步长 + 相邻状态插值渲染
+    这一版按坦克重写，和上一版相比主要改了 5 件事：
 
-    车型差异来自模型 meta：
-      · trackW        —— 履带中心距
-      · wheels[].c    —— 负重轮位置（取最前/最后两个当悬挂点）
-      · wheels[].c[1] —— 负重轮轴高（决定悬挂静止长度）
-      · bbox          —— 车体尺寸（算转动惯量）
-      · VEH.maxSpeed / reverseSpeed / turnRate —— 发动机与转向上限
-    质量在公式里基本被约掉（弹簧/牵引力都按质量缩放），所以不用给每辆车
-    单独填吨位；真正决定手感的是尺寸、速度、转向率和悬挂频率。            */
+    1) 悬挂点从 4 个变成「每侧最多 8 个」，位置直接取模型里的负重轮。
+       重量分散到所有轮子上，压到一块石头/一个坎时，车体只被抬起 1/N，
+       不会像 4 点支撑那样立刻整车点头 —— 这是“生硬”的最大来源。
+    2) 弹簧力方向改成竖直向上，不再沿地面法线。法线在坎边/坡顶会突变，
+       上一版过坎时那一下抽动就是它造成的。
+    3) 固定 120 Hz 物理步 + 渲染插值。物理状态只在整步推进，画面用
+       前后两个状态按剩余时间混合，144 Hz / 60 Hz 都不会一帧一帧跳。
+    4) 悬挂调软：静态下沉 0.14 m（约 1.3 Hz，接近真车 1–1.5 Hz），
+       带渐进限位（撞限位不再是硬墙）和落地额外阻尼。
+    5) 渲染时每个负重轮按脚下地形上下移动，车体悬挂动作能直接看见，
+       不再是一整块车壳在地面上滑。
+
+    渲染仍用 car.pos / car.yaw / car.pitch / car.roll，80_render 不用改。 */
+
+const PHYS_DT  = 1 / 120;      // 固定物理步
+const PHYS_SAG = 0.14;         // 静态下沉（m）；越大越软
+const PHYS_MU  = 1.15;         // 履带-地面附着系数
 
 const PHYS = {
   ready: false,
   id: '', meta: null,
-  mass: 40,                 // 吨
-  comH: 1.0,                // 质心高度（模型局部，履带底面为 0）
-  halfW: 1.15,              // 履带中心到中线
-  axleF: 2.0, axleR: -2.0,  // 前/后悬挂点
-  anchorY: 0.30,            // 悬挂点高度（模型局部）
-  L0: 0.44,                 // 悬挂自由长度
-  k: 900, damp: 100,        // 弹簧刚度 / 阻尼（kN/m, kN·s/m）
-  maxLoad: 700,             // 单轮最大支撑力（kN）
+  mass: 40,                     // 吨
+  comH: 1.0,                    // 质心高度（模型局部，履带底面为 0）
+  comZ: 0,                      // 质心纵向偏移：对准负重轮支撑中心，静止时不点头
+  halfW: 1.15,
+  anchorY: 0.30,                // 悬挂点高度（模型局部）
+  L0: 0.44,                     // 悬挂自由长度
+  contacts: [],                 // { lx, lz, side, k, damp, maxLoad }
   Ipitch: 260, Iroll: 110, Iyaw: 260,
+
   pos: [0, 0, 0], vel: [0, 0, 0],
   yaw: 0, pitch: 0, roll: 0,
   yawRate: 0, pitchRate: 0, rollRate: 0,
-  trackV: 0,                // 履带目标速度（一阶滤波）
+  trackV: 0,
   travelL: 0, travelR: 0,
-  wheels: [],
-  lastOx: 0, lastOz: 0, lastYaw: 0,
+
+  /* 固定步长 + 插值 */
+  accum: 0,
+  prev: { px: 0, py: 0, pz: 0, yaw: 0, pitch: 0, roll: 0, tL: 0, tR: 0 },
+  /* 上一帧真正画出去的位置，用来识别出生/重生/联机瞬移 */
+  visOx: 0, visOz: 0, visYaw: 0,
 };
 
 const P_EPS = 1e-9;
-
 function pc(v, a, b){ return v < a ? a : (v > b ? b : v); }
 
-/* 由 yaw / pitch / roll 求车体三轴（与 entityMats 的 Ry·Rx·Rz 完全一致） */
-function physBasis(out){
-  const cy = Math.cos(PHYS.yaw), sy = Math.sin(PHYS.yaw);
-  const cp = Math.cos(PHYS.pitch), sp = Math.sin(PHYS.pitch);
-  const cr = Math.cos(PHYS.roll), sr = Math.sin(PHYS.roll);
+/* 由 yaw / pitch / roll 求车体三轴（与 entityMats 的 Ry·Rx·Rz 一致） */
+function physBasis(out, yaw, pitch, roll){
+  if(yaw === undefined) yaw = PHYS.yaw;
+  if(pitch === undefined) pitch = PHYS.pitch;
+  if(roll === undefined) roll = PHYS.roll;
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cr = Math.cos(roll), sr = Math.sin(roll);
   out = out || [[0,0,0],[0,0,0],[0,0,0]];
   /* fwd = R*(0,0,1) */
   out[0][0] = sy * cp;  out[0][1] = -sp;  out[0][2] = cy * cp;
@@ -6332,21 +6356,26 @@ function physBasis(out){
   return out;
 }
 
-/* 模型局部点 → 世界坐标（不含质心偏移） */
-function physPoint(b, lx, ly, lz, out){
+/* 车辆原点（履带底面中心）= 质心 - up*comH - fwd*comZ */
+function physOrigin(b, out){
   out = out || [0,0,0];
-  out[0] = PHYS.pos[0] + b[1][0]*lx + b[2][0]*ly + b[0][0]*lz;
-  out[1] = PHYS.pos[1] + b[1][1]*lx + b[2][1]*ly + b[0][1]*lz;
-  out[2] = PHYS.pos[2] + b[1][2]*lx + b[2][2]*ly + b[0][2]*lz;
+  out[0] = PHYS.pos[0] - b[2][0] * PHYS.comH - b[0][0] * PHYS.comZ;
+  out[1] = PHYS.pos[1] - b[2][1] * PHYS.comH - b[0][1] * PHYS.comZ;
+  out[2] = PHYS.pos[2] - b[2][2] * PHYS.comH - b[0][2] * PHYS.comZ;
   return out;
 }
 
-/* 车辆原点（履带底面中心）= 质心 - up*comH */
-function physOrigin(b, out){
-  out = out || [0,0,0];
-  out[0] = PHYS.pos[0] - b[2][0] * PHYS.comH;
-  out[1] = PHYS.pos[1] - b[2][1] * PHYS.comH;
-  out[2] = PHYS.pos[2] - b[2][2] * PHYS.comH;
+/* 从模型 meta 取负重轮：按 z 均匀取最多 8 个/侧 */
+function physPickWheels(list, trackW){
+  const arr = list.slice().sort((a, b) => a.c[2] - b.c[2]);
+  const MAX = 8;
+  if(arr.length <= MAX) return arr;
+  const out = [];
+  for(let i = 0; i < MAX; i++){
+    const j = Math.round(i * (arr.length - 1) / (MAX - 1));
+    const w = arr[j];
+    if(!out.length || out[out.length - 1] !== w) out.push(w);
+  }
   return out;
 }
 
@@ -6359,86 +6388,122 @@ function physSetup(){
   const trackW = (meta && meta.trackW) || TRACK_W || 2.3;
   PHYS.halfW = Math.max(0.7, trackW * 0.5);
 
-  let front = 2.0, rear = -2.0, anchorY = 0.30;
+  /* ---- 选出参与物理的负重轮 ---- */
+  const left = [], right = [];
+  let minY = 1e9;
   if(meta && meta.wheels && meta.wheels.length){
-    let fz = -1e9, rz = 1e9, ay = 1e9, n = 0;
     for(const w of meta.wheels){
       if(!w || !w.c) continue;
-      if(Math.abs(w.c[0]) < trackW * 0.22) continue;
-      if(w.c[1] > 1.25) continue;
-      if(w.c[2] > fz) fz = w.c[2];
-      if(w.c[2] < rz) rz = w.c[2];
-      if(w.c[1] < ay) ay = w.c[1];
-      n++;
+      if(Math.abs(w.c[0]) < trackW * 0.22) continue;   // 中线上的小轮/备胎
+      if(w.c[1] > 0.80) continue;                      // 托带轮、挡泥板
+      if(w.r < 0.14) continue;                         // 托带轮
+      (w.c[0] < 0 ? left : right).push(w);
+      if(w.c[1] < minY) minY = w.c[1];
     }
-    if(n > 0){ front = fz; rear = rz; anchorY = ay; }
   }
-  if(front - rear < 2.0){ front = 1.6; rear = -1.6; }
-  PHYS.axleF = front;
-  PHYS.axleR = rear;
-  PHYS.anchorY = Math.max(0.16, Math.min(0.70, anchorY));
-  /* 静止时弹簧压 0.10 m，车体原点正好落在地面上（和旧版视觉一致） */
-  PHYS.L0 = PHYS.anchorY + 0.10;
+  let anchorY = (minY < 1e8) ? minY : 0.30;
+  anchorY = pc(anchorY, 0.16, 0.70);
+  PHYS.anchorY = anchorY;
+  PHYS.L0 = anchorY + PHYS_SAG;
 
-  /* 尺寸 / 质量 / 惯量 */
+  /* ---- 尺寸 / 质量 / 惯量 ---- */
   let bb = (meta && meta.bbox) || [[-1.7, 0, -3.0], [1.7, 2.6, 3.0]];
   const w = pc(bb[1][0] - bb[0][0], 2.0, 4.4);
   const l = pc((bb[1][2] - bb[0][2]) * 0.92, 3.8, 9.4);
   const hh = pc(bb[1][1] - bb[0][1], 1.2, 2.6);
   PHYS.mass = pc(w * l * hh * 0.34, 12, 70);
-
   PHYS.comH = pc(hh * 0.40, 0.75, 1.25);
   PHYS.Ipitch = PHYS.mass / 12 * (l * l + hh * hh) * 1.85;
   PHYS.Iroll  = PHYS.mass / 12 * (w * w + hh * hh) * 2.10;
   PHYS.Iyaw   = PHYS.mass / 12 * (w * w + l * l) * 1.50;
 
-  const c0 = 0.10;
-  PHYS.k = PHYS.mass * 9.81 / (4 * c0);
-  PHYS.damp = Math.sqrt(PHYS.k * PHYS.mass) * 0.60;
-  PHYS.maxLoad = PHYS.mass * 9.81 * 2.0;
+  /* ---- 悬挂点 ---- */
+  const raw = [];
+  if(left.length && right.length){
+    for(const w of physPickWheels(left,  trackW)) raw.push({ lx: w.c[0], lz: w.c[2], side: -1 });
+    for(const w of physPickWheels(right, trackW)) raw.push({ lx: w.c[0], lz: w.c[2], side:  1 });
+  }
+  if(raw.length < 4){
+    raw.length = 0;
+    const fz = (meta && meta.wheels && meta.wheels.length)
+      ? Math.max(...meta.wheels.map(x => x.c[2])) : 2.0;
+    const rz = (meta && meta.wheels && meta.wheels.length)
+      ? Math.min(...meta.wheels.map(x => x.c[2])) : -2.0;
+    raw.push({ lx: -PHYS.halfW, lz: fz, side: -1 });
+    raw.push({ lx:  PHYS.halfW, lz: fz, side:  1 });
+    raw.push({ lx: -PHYS.halfW, lz: rz, side: -1 });
+    raw.push({ lx:  PHYS.halfW, lz: rz, side:  1 });
+  }
 
-  PHYS.wheels = [
-    { lx: -PHYS.halfW, lz: PHYS.axleF, side: -1 },
-    { lx:  PHYS.halfW, lz: PHYS.axleF, side:  1 },
-    { lx: -PHYS.halfW, lz: PHYS.axleR, side: -1 },
-    { lx:  PHYS.halfW, lz: PHYS.axleR, side:  1 },
-  ];
+  const N = raw.length;
+  const kEach = PHYS.mass * 9.81 / (N * PHYS_SAG);
+  const dampEach = 1.10 * Math.sqrt(kEach * PHYS.mass / N);
+  const maxEach = PHYS.mass * 9.81 / N * 4.0;
+  PHYS.contacts = raw.map(c => ({ lx: c.lx, lz: c.lz, side: c.side,
+                                  k: kEach, damp: dampEach, maxLoad: maxEach }));
+  PHYS.zF = Math.max(...raw.map(c => c.lz)) + 0.35;
+  PHYS.zR = Math.min(...raw.map(c => c.lz)) - 0.35;
+  /* 把质心放到负重轮支撑中心，静止在平地上不会因为轮距偏心而点头 */
+  PHYS.comZ = pc(raw.reduce((a, c) => a + c.lz, 0) / N, -0.9, 0.9);
+
+  /* 侧倾/俯仰阻尼：只靠每个轮子的竖直阻尼，侧倾阻尼比只有 0.16 左右，
+     过坎后会来回晃很久。这里按临界阻尼补一份角阻尼。 */
+  let kR = 0, kP = 0;
+  for(const c of PHYS.contacts){
+    kR += kEach * c.lx * c.lx;
+    kP += kEach * c.lz * c.lz;
+  }
+  PHYS.rollDamp  = 0.30 * 2 * Math.sqrt(kR * PHYS.Iroll);
+  PHYS.pitchDamp = 0.30 * 2 * Math.sqrt(kP * PHYS.Ipitch);
 
   console.log(`  物理：${PHYS.id || '?'}  ${PHYS.mass.toFixed(1)} t  ` +
-              `轴距 ${(front - rear).toFixed(2)} m  轮距 ${(trackW).toFixed(2)} m  ` +
-              `重心 ${PHYS.comH.toFixed(2)} m`);
+              `悬挂 ${N} 点  L0 ${PHYS.L0.toFixed(2)} m  ` +
+              `重心 ${PHYS.comH.toFixed(2)} m  f≈${(Math.sqrt(9.81/PHYS_SAG)/(2*Math.PI)).toFixed(2)} Hz`);
 }
 
 /* 把当前 car 状态当成初值（出生 / 重生 / 瞬移 / 换车） */
 function physReset(){
   const gy = groundH(car.pos[0], car.pos[2]);
   car.pos[1] = gy;
-  PHYS.pos[0] = car.pos[0];
-  PHYS.pos[1] = gy + PHYS.comH;
-  PHYS.pos[2] = car.pos[2];
-  PHYS.vel[0] = PHYS.vel[1] = PHYS.vel[2] = 0;
   PHYS.yaw = car.yaw || 0;
+  PHYS.pos[0] = car.pos[0] + Math.sin(PHYS.yaw) * PHYS.comZ;
+  PHYS.pos[1] = gy + PHYS.comH;
+  PHYS.pos[2] = car.pos[2] + Math.cos(PHYS.yaw) * PHYS.comZ;
+  PHYS.vel[0] = PHYS.vel[1] = PHYS.vel[2] = 0;
   PHYS.pitch = 0;
   PHYS.roll = 0;
   PHYS.yawRate = PHYS.pitchRate = PHYS.rollRate = 0;
   PHYS.trackV = 0;
   PHYS.travelL = PHYS.travelR = 0;
-  PHYS.lastOx = car.pos[0];
-  PHYS.lastOz = car.pos[2];
-  PHYS.lastYaw = PHYS.yaw;
+  PHYS.accum = 0;
+  PHYS.prev.px = PHYS.pos[0]; PHYS.prev.py = PHYS.pos[1]; PHYS.prev.pz = PHYS.pos[2];
+  PHYS.prev.yaw = PHYS.yaw; PHYS.prev.pitch = 0; PHYS.prev.roll = 0;
+  PHYS.prev.tL = PHYS.prev.tR = 0;
+  PHYS.visOx = car.pos[0]; PHYS.visOz = car.pos[2]; PHYS.visYaw = PHYS.yaw;
   PHYS.ready = true;
+  physRender(1);
 }
 
-/* 把物理状态写回 car（渲染 / HUD / 音效 / 相机都读这些） */
-function physSync(b){
-  b = b || physBasis();
-  const o = physOrigin(b);
+/* 把物理状态（可插值）写回 car */
+function physRender(alpha){
+  const p = PHYS.prev;
+  const a = pc(alpha === undefined ? 1 : alpha, 0, 1);
+  const x = p.px + (PHYS.pos[0] - p.px) * a;
+  const y = p.py + (PHYS.pos[1] - p.py) * a;
+  const z = p.pz + (PHYS.pos[2] - p.pz) * a;
+  const yaw   = p.yaw   + (PHYS.yaw   - p.yaw)   * a;
+  const pitch = p.pitch + (PHYS.pitch - p.pitch) * a;
+  const roll  = p.roll  + (PHYS.roll  - p.roll)  * a;
+
+  const b = physBasis(_b, yaw, pitch, roll);
+  const o = physOriginAt(b, x, y, z);
+
   car.pos[0] = o[0];
   car.pos[1] = o[1];
   car.pos[2] = o[2];
-  car.yaw = PHYS.yaw;
-  car.pitch = PHYS.pitch;
-  car.roll = PHYS.roll;
+  car.yaw = yaw;
+  car.pitch = pitch;
+  car.roll = roll;
   car.yawRate = PHYS.yawRate;
 
   const vF = PHYS.vel[0]*b[0][0] + PHYS.vel[1]*b[0][1] + PHYS.vel[2]*b[0][2];
@@ -6446,13 +6511,26 @@ function physSync(b){
   car.v = vF;
   car.vL = vF - half;
   car.vR = vF + half;
-  car.travelL = PHYS.travelL;
-  car.travelR = PHYS.travelR;
+  car.travelL = p.tL + (PHYS.travelL - p.tL) * a;
+  car.travelR = p.tR + (PHYS.travelR - p.tR) * a;
   car.prevV = vF;
 
-  PHYS.lastOx = car.pos[0];
-  PHYS.lastOz = car.pos[2];
-  PHYS.lastYaw = PHYS.yaw;
+  PHYS.visOx = o[0]; PHYS.visOz = o[2]; PHYS.visYaw = yaw;
+}
+
+function physOriginAt(b, px, py, pz, out){
+  out = out || [0,0,0];
+  out[0] = px - b[2][0] * PHYS.comH - b[0][0] * PHYS.comZ;
+  out[1] = py - b[2][1] * PHYS.comH - b[0][1] * PHYS.comZ;
+  out[2] = pz - b[2][2] * PHYS.comH - b[0][2] * PHYS.comZ;
+  return out;
+}
+
+function physSnapPrev(){
+  const p = PHYS.prev;
+  p.px = PHYS.pos[0]; p.py = PHYS.pos[1]; p.pz = PHYS.pos[2];
+  p.yaw = PHYS.yaw; p.pitch = PHYS.pitch; p.roll = PHYS.roll;
+  p.tL = PHYS.travelL; p.tR = PHYS.travelR;
 }
 
 /* 联机推挤 / 建筑碰撞：直接平移刚体并给一点速度 */
@@ -6462,7 +6540,8 @@ function physPush(dx, dz){
   PHYS.pos[2] += dz;
   PHYS.vel[0] += dx * 1.5;
   PHYS.vel[2] += dz * 1.5;
-  physSync();
+  physSnapPrev();
+  physRender(0);
 }
 
 /* 阵亡 / 重生：把水平速度清零（垂直速度留着，空中阵亡就自然落地） */
@@ -6472,18 +6551,14 @@ function physHalt(){
   PHYS.yawRate = PHYS.pitchRate = PHYS.rollRate = 0;
   PHYS.trackV = 0;
   PHYS.pitch = 0; PHYS.roll = 0;
-  PHYS.lastOx = car.pos[0];
-  PHYS.lastOz = car.pos[2];
-  PHYS.lastYaw = car.yaw;
+  physSnapPrev();
+  physRender(0);
 }
 
 /* ---------------------------------------------------------------- 单个物理步 */
 const _b = [[0,0,0],[0,0,0],[0,0,0]];
-const _n = [0,1,0];
 const _r = [0,0,0];
 const _vc = [0,0,0];
-const _tf = [0,0,0];
-const _side = [0,0,0];
 const _H = [0,0,0];
 
 function physSub(h, thr, str){
@@ -6492,11 +6567,12 @@ function physSub(h, thr, str){
   const fwd = b[0], rgt = b[1], up = b[2];
   const m = PHYS.mass;
   const o = physOrigin(b);
+  const N = PHYS.contacts.length || 1;
 
   let Fx = 0, Fy = -m * 9.81, Fz = 0;
   let Tx = 0, Ty = 0, Tz = 0;
 
-  /* 履带目标速度：一阶滤波，避免松手瞬间反向 */
+  /* 履带目标速度 */
   const maxS = V.maxSpeed || 15;
   const revS = V.reverseSpeed || 6.5;
   const wantV = thr >= 0 ? thr * maxS : thr * revS;
@@ -6507,118 +6583,110 @@ function physSub(h, thr, str){
   const wy = up[1]*PHYS.yawRate + rgt[1]*PHYS.pitchRate + fwd[1]*PHYS.rollRate;
   const wz = up[2]*PHYS.yawRate + rgt[2]*PHYS.pitchRate + fwd[2]*PHYS.rollRate;
 
+  /* 摩擦平面用水平面，不用地面法线：坎边法线突变会让车抽一下 */
+  const hy = PHYS.yaw;
+  const hf = [Math.sin(hy), 0, Math.cos(hy)];
+  const hs = [Math.cos(hy), 0, -Math.sin(hy)];
+
+  /* ---- 坡度分量 ----
+     弹簧力是竖直的，重力也是竖直的，所以坡面不会自动产生下滑力。
+     这里显式补上重力沿坡面的分量（-m*g*grad h），上坡才有阻力；
+     松油门时的驻车力再把它抵消掉。 */
+  const se = 1.0;
+  const gx = (groundH(PHYS.pos[0] + se, PHYS.pos[2]) - groundH(PHYS.pos[0] - se, PHYS.pos[2])) / (2*se);
+  const gz = (groundH(PHYS.pos[0], PHYS.pos[2] + se) - groundH(PHYS.pos[0], PHYS.pos[2] - se)) / (2*se);
+  Fx -= m * 9.81 * gx;
+  Fz -= m * 9.81 * gz;
+
   let nContact = 0;
   let vLongL = 0, vLongR = 0, nL = 0, nR = 0;
-  let loadSum = 0;
 
-  for(const w of PHYS.wheels){
-    /* 悬挂点：局部 (lx, anchorY, lz) → 世界，ray 竖直向下 */
-    const ax = o[0] + rgt[0]*w.lx + up[0]*PHYS.anchorY + fwd[0]*w.lz;
-    const ay = o[1] + rgt[1]*w.lx + up[1]*PHYS.anchorY + fwd[1]*w.lz;
-    const az = o[2] + rgt[2]*w.lx + up[2]*PHYS.anchorY + fwd[2]*w.lz;
+  for(const c of PHYS.contacts){
+    /* 悬挂点：局部 (lx, anchorY, lz) → 世界，竖直向下找地 */
+    const ax = o[0] + rgt[0]*c.lx + up[0]*PHYS.anchorY + fwd[0]*c.lz;
+    const ay = o[1] + rgt[1]*c.lx + up[1]*PHYS.anchorY + fwd[1]*c.lz;
+    const az = o[2] + rgt[2]*c.lx + up[2]*PHYS.anchorY + fwd[2]*c.lz;
 
     const g = groundH(ax, az);
-    let d = ay - g;
+    const d = ay - g;
     if(d > PHYS.L0) continue;                    // 轮子离地
-
-    let c = PHYS.L0 - d;
-    if(c < 0) c = 0;
-    if(c > PHYS.L0 * 1.25) c = PHYS.L0 * 1.25;   // 已经陷进地里的极端情况
-
-    groundNormal(ax, az, _n);
-    if(_n[1] < 0.30){ _n[1] = 0.30; }             // 别把陡壁当成地面
-    const invN = 1 / Math.hypot(_n[0], _n[1], _n[2]);
-    _n[0] *= invN; _n[1] *= invN; _n[2] *= invN;
+    let comp = PHYS.L0 - d;
+    if(comp < 0) comp = 0;
+    if(comp > PHYS.L0 * 1.12) comp = PHYS.L0 * 1.12;
 
     _H[0] = ax; _H[1] = g; _H[2] = az;
     _r[0] = _H[0] - PHYS.pos[0];
     _r[1] = _H[1] - PHYS.pos[1];
     _r[2] = _H[2] - PHYS.pos[2];
 
-    /* 接触点速度 = 线速度 + ω×r */
+    /* 接地点速度 = 线速度 + ω×r */
     _vc[0] = PHYS.vel[0] + wy*_r[2] - wz*_r[1];
     _vc[1] = PHYS.vel[1] + wz*_r[0] - wx*_r[2];
     _vc[2] = PHYS.vel[2] + wx*_r[1] - wy*_r[0];
-    const vN = _vc[0]*_n[0] + _vc[1]*_n[1] + _vc[2]*_n[2];
+    const vy = _vc[1];
 
-    let Fs = PHYS.k * c - PHYS.damp * vN;
+    /* ---- 弹簧 + 阻尼（竖直方向） ---- */
+    let Fs = c.k * comp;
+    /* 落地/大冲击时额外加阻尼，吸收第一次回弹 */
+    const dampMul = vy < -2.0 ? Math.min(2.6, 1 - (vy + 2.0) * 0.45) : 1.0;
+    Fs -= c.damp * vy * dampMul;
+    /* 渐进限位：压到 82% 行程后越来越硬，避免“撞墙” */
+    const bs = PHYS.L0 * 0.82;
+    if(comp > bs) Fs += c.k * 6.0 * (comp - bs);
     if(Fs < 0) Fs = 0;
-    if(Fs > PHYS.maxLoad) Fs = PHYS.maxLoad;
+    if(Fs > c.maxLoad) Fs = c.maxLoad;
 
-    Fx += _n[0] * Fs; Fy += _n[1] * Fs; Fz += _n[2] * Fs;
-    Tx += _r[1]*_n[2]*Fs - _r[2]*_n[1]*Fs;
-    Ty += _r[2]*_n[0]*Fs - _r[0]*_n[2]*Fs;
-    Tz += _r[0]*_n[1]*Fs - _r[1]*_n[0]*Fs;
+    Fy += Fs;
+    Tx += -_r[2] * Fs;
+    Tz +=  _r[0] * Fs;
 
     nContact++;
-    loadSum += Fs;
 
-    /* ---- 履带牵引 / 侧向摩擦 ---- */
-    const nDotF = _n[0]*fwd[0] + _n[1]*fwd[1] + _n[2]*fwd[2];
-    _tf[0] = fwd[0] - _n[0]*nDotF;
-    _tf[1] = fwd[1] - _n[1]*nDotF;
-    _tf[2] = fwd[2] - _n[2]*nDotF;
-    const tfl = Math.hypot(_tf[0], _tf[1], _tf[2]);
-    if(tfl < 0.20) continue;                      // 车体几乎立起来，没有有效前进方向
-    _tf[0] /= tfl; _tf[1] /= tfl; _tf[2] /= tfl;
+    /* ---- 履带牵引 / 侧向摩擦（水平面） ---- */
+    const vLong = _vc[0]*hf[0] + _vc[2]*hf[2];
+    const vLat  = _vc[0]*hs[0] + _vc[2]*hs[2];
 
-    _side[0] = _n[1]*_tf[2] - _n[2]*_tf[1];
-    _side[1] = _n[2]*_tf[0] - _n[0]*_tf[2];
-    _side[2] = _n[0]*_tf[1] - _n[1]*_tf[0];
-    const sl = Math.hypot(_side[0], _side[1], _side[2]) || 1;
-    _side[0] /= sl; _side[1] /= sl; _side[2] /= sl;
+    if(c.side > 0){ vLongL += vLong; nL++; } else { vLongR += vLong; nR++; }
 
-    const vLong = _vc[0]*_tf[0] + _vc[1]*_tf[1] + _vc[2]*_tf[2];
-    const vLat  = _vc[0]*_side[0] + _vc[1]*_side[1] + _vc[2]*_side[2];
-
-    if(w.side > 0){ vLongL += vLong; nL++; } else { vLongR += vLong; nR++; }
-
-    const lim = Fs * 1.15;                        // μN：附着力上限
-    let fl;
+    const lim = Fs * PHYS_MU;
+    let totalFl;
     if(Math.abs(thr) < 0.06){
-      fl = -vLong * m * 1.15;                     // 松油门：刹车
+      totalFl = -vLong * m * 1.15;                       // 松油门：刹车
     } else if(thr * vLong < -0.2 && Math.abs(vLong) > 1.6){
-      fl = -Math.sign(vLong) * m * 1.05;          // 反打方向：先刹住再反向
+      totalFl = -Math.sign(vLong) * m * 1.05;            // 反打方向：先刹停
     } else {
-      fl = (PHYS.trackV - vLong) * m * 0.55;      // 驱动
+      totalFl = (PHYS.trackV - vLong) * m * 2.40;        // 驱动
     }
-    fl = pc(fl, -m * 1.15, m * 1.15);
-    fl -= vLong * m * 0.045;                      // 滚阻
-    if(fl > lim) fl = lim; else if(fl < -lim) fl = -lim;
+    totalFl = pc(totalFl, -m * 4.0, m * 4.0) - vLong * m * 0.18;
+    let fl = pc(totalFl / N, -lim, lim);
 
-    let fs = -vLat * m * 0.85;                    // 横向：履带抗侧滑
-    if(fs > lim) fs = lim; else if(fs < -lim) fs = -lim;
+    let fsl = -vLat * m * 3.4 / N;                       // 横向抗侧滑
+    fsl = pc(fsl, -lim, lim);
 
-    const fx = _tf[0]*fl + _side[0]*fs;
-    const fy = _tf[1]*fl + _side[1]*fs;
-    const fz = _tf[2]*fl + _side[2]*fs;
-    Fx += fx; Fy += fy; Fz += fz;
-    Tx += _r[1]*fz - _r[2]*fy;
-    Ty += _r[2]*fx - _r[0]*fz;
-    Tz += _r[0]*fy - _r[1]*fx;
+    const fx = hf[0]*fl + hs[0]*fsl;
+    const fz = hf[2]*fl + hs[2]*fsl;
+    Fx += fx; Fz += fz;
+    /* τ = r × F，F 只有水平分量 */
+    Tx += _r[1] * fz;
+    Ty += _r[2] * fx - _r[0] * fz;
+    Tz += -_r[1] * fx;
   }
 
-  /* ---- 驻车：松油门且基本停住时，抵消重力沿坡的分量 ----
-     这是履带驻车制动，作用在质心上，不产生力矩，所以不会妨碍原地转向。 */
+  /* ---- 驻车：松油门且基本停住时，抵消上面补的坡度分量 ----
+     作用在质心上，不产生力矩，不影响原地转向。 */
   if(Math.abs(thr) < 0.06){
-    const hs = Math.hypot(PHYS.vel[0], PHYS.vel[2]);
-    if(hs < 1.6){
-      const e = 0.7;
-      const sx = (groundH(PHYS.pos[0] + e, PHYS.pos[2]) - groundH(PHYS.pos[0] - e, PHYS.pos[2])) / (2*e);
-      const sz = (groundH(PHYS.pos[0], PHYS.pos[2] + e) - groundH(PHYS.pos[0], PHYS.pos[2] - e)) / (2*e);
-      let hx = m * 9.81 * sx, hz = m * 9.81 * sz;
-      const hl = Math.hypot(hx, hz), hmax = m * 9.81 * 0.95;
-      if(hl > hmax){ const s = hmax / hl; hx *= s; hz *= s; }
-      Fx += hx - PHYS.vel[0] * m * 2.5;
-      Fz += hz - PHYS.vel[2] * m * 2.5;
+    const hs2 = Math.hypot(PHYS.vel[0], PHYS.vel[2]);
+    if(hs2 < 1.6){
+      Fx += m * 9.81 * gx - PHYS.vel[0] * m * 2.5;
+      Fz += m * 9.81 * gz - PHYS.vel[2] * m * 2.5;
     }
   }
 
-  /* ---- 转向：履带差速的等效偏航力矩（有角惯性，不是直接改朝向） ---- */
+  /* ---- 转向：履带差速的等效偏航力矩 ---- */
   if(nContact > 0){
     const vF = PHYS.vel[0]*fwd[0] + PHYS.vel[2]*fwd[2];
     const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
-    const turnT = str * (V.turnRate || 2.2) * 0.55 * (1 - 0.60 * spdK);
+    const turnT = str * (V.turnRate || 2.2) * 0.46 * (1 - 0.60 * spdK);
     const tauMax = PHYS.Iyaw * 2.4;
     let tau = (turnT - PHYS.yawRate) * PHYS.Iyaw * 6.0;
     if(tau > tauMax) tau = tauMax; else if(tau < -tauMax) tau = -tauMax;
@@ -6634,41 +6702,38 @@ function physSub(h, thr, str){
   PHYS.pos[1] += PHYS.vel[1] * h;
   PHYS.pos[2] += PHYS.vel[2] * h;
 
-  let tP = (Tx*rgt[0] + Ty*rgt[1] + Tz*rgt[2]) / PHYS.Ipitch;
-  let tR = (Tx*fwd[0] + Ty*fwd[1] + Tz*fwd[2]) / PHYS.Iroll;
-  let tY = (Tx*up[0]  + Ty*up[1]  + Tz*up[2])  / PHYS.Iyaw;
+  PHYS.pitchRate += (Tx*rgt[0] + Ty*rgt[1] + Tz*rgt[2]) / PHYS.Ipitch * h;
+  PHYS.rollRate  += (Tx*fwd[0] + Ty*fwd[1] + Tz*fwd[2]) / PHYS.Iroll  * h;
+  PHYS.yawRate   += (Tx*up[0]  + Ty*up[1]  + Tz*up[2])  / PHYS.Iyaw   * h;
 
-  PHYS.pitchRate += tP * h;
-  PHYS.rollRate  += tR * h;
-  PHYS.yawRate   += tY * h;
-
-  /* 一点点姿态阻尼，防止弹簧在硬坎上来回振 */
-  PHYS.pitchRate *= Math.max(0, 1 - 0.55 * h);
-  PHYS.rollRate  *= Math.max(0, 1 - 0.55 * h);
+  /* 姿态阻尼：轮子阻尼 + 补的侧倾/俯仰角阻尼，压住过坎后的来回晃 */
+  PHYS.pitchRate *= Math.max(0, 1 - (0.55 + (PHYS.pitchDamp || 0) / PHYS.Ipitch) * h);
+  PHYS.rollRate  *= Math.max(0, 1 - (0.55 + (PHYS.rollDamp  || 0) / PHYS.Iroll ) * h);
 
   PHYS.yaw += PHYS.yawRate * h;
   PHYS.pitch += PHYS.pitchRate * h;
   PHYS.roll  += PHYS.rollRate * h;
 
-  /* 不追求翻车：翻过这个角度就顶住并吃掉角速度（坦克也翻不了） */
   if(PHYS.pitch > 0.62){ PHYS.pitch = 0.62; if(PHYS.pitchRate > 0) PHYS.pitchRate = 0; }
   if(PHYS.pitch < -0.62){ PHYS.pitch = -0.62; if(PHYS.pitchRate < 0) PHYS.pitchRate = 0; }
-  if(PHYS.roll > 0.58){ PHYS.roll = 0.58; if(PHYS.rollRate > 0) PHYS.rollRate = 0; }
-  if(PHYS.roll < -0.58){ PHYS.roll = -0.58; if(PHYS.rollRate < 0) PHYS.rollRate = 0; }
+  if(PHYS.roll > 0.52){ PHYS.roll = 0.52; if(PHYS.rollRate > 0) PHYS.rollRate = 0; }
+  if(PHYS.roll < -0.52){ PHYS.roll = -0.52; if(PHYS.rollRate < 0) PHYS.rollRate = 0; }
 
-  /* ---- 车体别插进地里（车头扎进坡、骑在坎上、翻坡时兜底） ---- */
+  /* ---- 车体兜底：别让车壳插进地里 ---- */
   const b2 = physBasis(_b);
   const o2 = physOrigin(b2);
   const hw = PHYS.halfW * 0.98;
+  const zF = PHYS.zF || 2.2;
+  const zR = PHYS.zR || -2.2;
   let pen = 0;
   for(let k = 0; k < 6; k++){
     let lx, lz;
     if(k === 0){ lx = 0; lz = 0; }
-    else if(k === 1){ lx = -hw; lz = PHYS.axleF + 0.35; }
-    else if(k === 2){ lx =  hw; lz = PHYS.axleF + 0.35; }
-    else if(k === 3){ lx = -hw; lz = PHYS.axleR - 0.35; }
-    else if(k === 4){ lx =  hw; lz = PHYS.axleR - 0.35; }
-    else { lx = 0; lz = PHYS.axleR - 0.35; }
+    else if(k === 1){ lx = -hw; lz = zF; }
+    else if(k === 2){ lx =  hw; lz = zF; }
+    else if(k === 3){ lx = -hw; lz = zR; }
+    else if(k === 4){ lx =  hw; lz = zR; }
+    else { lx = 0; lz = zR; }
     const px = o2[0] + b2[1][0]*lx + b2[0][0]*lz;
     const py = o2[1] + b2[1][1]*lx + b2[0][1]*lz;
     const pz = o2[2] + b2[1][2]*lx + b2[0][2]*lz;
@@ -6676,29 +6741,25 @@ function physSub(h, thr, str){
     if(gg - py > pen) pen = gg - py;
   }
   if(pen > 0.05){
-    PHYS.pos[1] += pen * 0.70;
-    if(PHYS.vel[1] < 0) PHYS.vel[1] *= 0.25;
+    PHYS.pos[1] += pen * 0.55;
+    if(PHYS.vel[1] < 0) PHYS.vel[1] *= 0.30;
     PHYS.pitchRate *= 0.85;
     PHYS.rollRate *= 0.85;
   }
 
-  /* 极端数值兜底 */
+  /* 数值兜底 */
   const sp2 = PHYS.vel[0]*PHYS.vel[0] + PHYS.vel[1]*PHYS.vel[1] + PHYS.vel[2]*PHYS.vel[2];
   if(sp2 > 3600){
     const s = 60 / Math.sqrt(sp2);
     PHYS.vel[0] *= s; PHYS.vel[1] *= s; PHYS.vel[2] *= s;
   }
 
-  /* 履带里程（渲染履带/负重轮转动） */
+  /* 履带里程 */
   PHYS.travelL += (nL ? vLongL / nL : PHYS.trackV) * h;
   PHYS.travelR += (nR ? vLongR / nR : PHYS.trackV) * h;
 }
 
 /* ---------------------------------------------------------------- 对外入口 */
-/*  updateSim 每帧调用一次：
-      dt   —— 帧间隔
-      thr  —— -1..1（负数是倒车）
-      str  —— -1..1（正数向左 / A 键）                                     */
 function physStep(dt, thr, str){
   const meta = (USE_MODEL && MODEL && MODEL.meta) ? MODEL.meta : null;
   if(!PHYS.ready || PHYS.meta !== meta || PHYS.id !== (SELECTED_ID || '')){
@@ -6706,29 +6767,40 @@ function physStep(dt, thr, str){
     physReset();
   }
 
-  /* 出生 / 重生 / 联机瞬移：car.pos 被外部直接改了，物理状态跟着重置 */
-  const dx = car.pos[0] - PHYS.lastOx, dz = car.pos[2] - PHYS.lastOz;
-  if(dx*dx + dz*dz > 9.0 || Math.abs(wrapPi(car.yaw - PHYS.lastYaw)) > 0.6){
+  /* 出生 / 重生 / 联机瞬移：car.pos 被外部直接改了 */
+  const dx = car.pos[0] - PHYS.visOx, dz = car.pos[2] - PHYS.visOz;
+  if(dx*dx + dz*dz > 9.0 || Math.abs(wrapPi(car.yaw - PHYS.visYaw)) > 0.6){
     physReset();
   }
 
   if(dt <= 0) return;
   if(dt > 0.12) dt = 0.12;
-  const n = Math.max(1, Math.min(6, Math.ceil(dt / (1 / 120))));
-  const h = dt / n;
-  for(let i = 0; i < n; i++) physSub(h, thr, str);
 
-  const b = physBasis(_b);
-  physSync(b);
+  /* 固定步长累加。渲染用两个物理状态插值，画面不会跟着帧率抖。 */
+  PHYS.accum = Math.min(PHYS.accum + dt, 0.10);
+  let steps = 0;
+  while(PHYS.accum >= PHYS_DT && steps < 6){
+    physSnapPrev();
+    physSub(PHYS_DT, thr, str);
+    PHYS.accum -= PHYS_DT;
+    steps++;
+  }
+  if(steps === 6 && PHYS.accum >= PHYS_DT) PHYS.accum = 0;   // 卡顿时丢掉积压
 
-  /* 地图模式：建筑碰撞（白模场没有建筑，不走这里） */
+  /* 地图模式：建筑碰撞（白模场没有建筑） */
   if(MAP.ok){
-    const hit = mapCollide(car.pos[0], car.pos[2], 1.9);
+    const b = physBasis(_b);
+    const o = physOrigin(b);
+    const hit = mapCollide(o[0], o[2], 1.9);
     if(hit){
-      physPush(hit.dx, hit.dz);
+      PHYS.pos[0] += hit.dx;
+      PHYS.pos[2] += hit.dz;
       PHYS.vel[0] *= 0.4; PHYS.vel[2] *= 0.4;
+      physSnapPrev();
     }
   }
+
+  physRender(PHYS.accum / PHYS_DT);
 }
 
 /* ===================== 70_sim.js ===================== */
