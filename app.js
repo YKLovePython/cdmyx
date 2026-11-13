@@ -6922,7 +6922,7 @@ function physYawAssist(dt, str){
   const maxS = V.maxSpeed || 15.5;
   const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
 
-  const target = str * (V.turnRate || 2.2) * 0.65 * (1 - 0.60 * spdK);
+  const target = str * (V.turnRate || 2.2) * 0.75 * (1 - 0.60 * spdK);
   const blend = Math.abs(str) > 0.02 ? 1.0 : 0.22;
   let rate = PHYS.yawVis + (target - PHYS.yawVis) * blend;
   const maxDelta = 18 * dt;
