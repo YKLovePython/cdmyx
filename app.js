@@ -6530,6 +6530,7 @@ const PHYS = {
   id: '', meta: null,
   mass: 19000, comH: 1.0, comZ: 0, halfW: 1.15,
   rEff: 0.3, anchorY: 0.3, Iyaw: 90000,
+  yawVis: 0,                        // 控制层输出的 yaw 角速度（rad/s）
   contacts: [],                    // { lx, lz, side }
   accum: 0,
   prev: { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 },
@@ -6730,6 +6731,7 @@ function physSetupVehicle(){
   PHYS.veh = veh;
   PHYS.ready = true;
   PHYS.accum = 0;
+  PHYS.yawVis = 0;
 
   console.log(`  物理：${PHYS.id || '?'}  ${(PHYS.mass / 1000).toFixed(1)} t  ` +
               `Rapier 悬挂 ${N} 点  r=${PHYS.rEff.toFixed(2)} m  ` +
@@ -6788,11 +6790,10 @@ function physSync(alpha){
   car.roll  = Math.asin(pc(rgt[1] / Math.max(0.05, Math.cos(car.pitch)), -1, 1));
 
   const v = b.linvel(_v);
-  const av = b.angvel(_av);
   const vF = v.x * fwd[0] + v.y * fwd[1] + v.z * fwd[2];
   car.v = vF;
-  car.yawRate = av.y;
-  const half = av.y * PHYS.halfW;
+  car.yawRate = PHYS.yawVis;
+  const half = PHYS.yawVis * PHYS.halfW;
   car.vL = vF - half;
   car.vR = vF + half;
   car.prevV = vF;
@@ -6828,6 +6829,7 @@ function physReset(){
   }
   PHYS.accum = 0;
   PHYS.travelL = PHYS.travelR = 0;
+  PHYS.yawVis = 0;
   physSnapPrev();
   physSync(1);
 }
@@ -6857,6 +6859,7 @@ function physHalt(){
       PHYS.veh.setWheelSteering(i, 0);
     }
   }
+  PHYS.yawVis = 0;
   physSnapPrev();
   physSync(1);
 }
@@ -6909,32 +6912,41 @@ function physDrive(dt, thr, str){
 function physYawAssist(dt, str){
   const b = PHYS.body;
   if(!b || !PHYS.veh) return;
-  let grounded = false;
-  for(let i = 0; i < PHYS.contacts.length; i++){
-    if(PHYS.veh.wheelIsInContact(i)){ grounded = true; break; }
-  }
-  if(!grounded) return;
 
   const V = (typeof VEH !== 'undefined' && VEH) ? VEH : (VEHICLES && VEHICLES.bmpt) || {};
   const q = b.rotation(_q);
   const m = quatMat(q.x, q.y, q.z, q.w, _m3);
   const fwd = [m[0][2], m[1][2], m[2][2]];
-  const up  = [m[0][1], m[1][1], m[2][1]];
   const v = b.linvel(_v);
   const vF = v.x * fwd[0] + v.y * fwd[1] + v.z * fwd[2];
   const maxS = V.maxSpeed || 15.5;
   const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
 
+  const target = str * (V.turnRate || 2.2) * 0.65 * (1 - 0.60 * spdK);
+  const blend = Math.abs(str) > 0.02 ? 1.0 : 0.22;
+  let rate = PHYS.yawVis + (target - PHYS.yawVis) * blend;
+  const maxDelta = 18 * dt;
+  rate = pc(rate, PHYS.yawVis - maxDelta, PHYS.yawVis + maxDelta);
+  PHYS.yawVis = rate;
+
+  /* 直接绕世界 Y 轴转车体：这是控制层，不依赖履带摩擦能不能推得动。
+     Rapier 的侧向摩擦对履带原地转向的阻力太大，纯力矩/角速度都会被吃掉。 */
+  const ang = rate * dt;
+  if(Math.abs(ang) > 1e-7){
+    const s = Math.sin(ang * 0.5), c = Math.cos(ang * 0.5);
+    const nx = c * q.x + s * q.z;
+    const ny = c * q.y + s * q.w;
+    const nz = c * q.z - s * q.x;
+    const nw = c * q.w - s * q.y;
+    const nl = Math.hypot(nx, ny, nz, nw) || 1;
+    b.setRotation({ x: nx / nl, y: ny / nl, z: nz / nl, w: nw / nl }, true);
+  }
+
+  /* 把物理引擎里的 yaw 角速度清零，避免下一步再叠一次；
+     pitch/roll 角速度保留，悬挂和翻滚还是 Rapier 算。 */
   const av = b.angvel(_av);
-  const yawRate = av.x * up[0] + av.y * up[1] + av.z * up[2];
-  const target = str * (V.turnRate || 2.2) * 0.60 * (1 - 0.65 * spdK);
-  let delta = (target - yawRate) * (Math.abs(str) > 0.02 ? 1.0 : 0.22);
-  const lim = 16 * dt;
-  delta = pc(delta, -lim, lim);
-  if(Math.abs(delta) > 1e-5){
-    b.setAngvel({ x: av.x + up[0] * delta,
-                  y: av.y + up[1] * delta,
-                  z: av.z + up[2] * delta }, true);
+  if(Math.abs(av.y) > 1e-6){
+    b.setAngvel({ x: av.x, y: 0, z: av.z }, true);
   }
 }
 
