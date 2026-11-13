@@ -1606,7 +1606,7 @@ const NATIONS = {
   us: { id: 'us', name: '美国',   short: 'US', color: '#5f8ed0' },
   de: { id: 'de', name: '德国',   short: 'DE', color: '#a9adb4' },
 };
-const NATION_ORDER = ['ru', 'cn', 'us', 'de'];
+const NATION_ORDER = ['de', 'us'];
 
 /* ---- 年代 / 定位标签 ---- */
 const ERA_LABEL = { ww2: '二战', cold: '冷战', modern: '现代' };
@@ -1615,7 +1615,14 @@ const ROLE_LABEL = {
   wheeled: '轮式战车', ifv: '步兵战车', spg: '自行火炮', rocket: '火箭炮',
 };
 
-const DEFAULT_ID = 'bmpt';
+const DEFAULT_ID = 'pz4h';
+
+/* 车库首批开放名单：德 6 + 美 6。其余已烘焙的车仍可用 ?veh=<id> 直开，
+   等这一批跑顺了再把 LIBRARY 补到德 20 + 美 26。                       */
+const LIBRARY = [
+  'pz4h', 'tiger1', 'tiger2', 'pantherg', 'leo2a4', 'leo2a7v',
+  'm1a2', 'm3', 'm18', 'm4a3e8', 'm36', 'm60',
+];
 
 const VEHICLES = {
   bmpt: {
@@ -1695,6 +1702,60 @@ const VEHICLES = {
               spread: 0.0009, dmg: 80, mag: 10, reload: 17.0, g: 9.81 },
     stat: { spd: 2.2, fire: 4.8, armor: 4.8 },
     desc: '122mm 线膛炮 · 单发重锤、装填极慢',
+  },
+
+  /* ============================ 美国 ============================ */
+  m18: {
+    id: 'm18', name: 'M18', full: 'M18 地狱猫 坦克歼击车', tag: 'M18',
+    nation: 'us', era: 'ww2', role: 'td',
+    muzzlePair: false, trackDir: 1,
+    maxSpeed: 16.5, reverseSpeed: 6.5, turnRate: 2.50,
+    turretRate: 0.80, gunRate: 0.48,
+    gunMin: -0.10, gunMax: 0.35,
+    sight: [0, 2.31, 0.10],
+    weapon: { name: '76mm M1A1', short: '76mm', rpm: 8.0, v0: 792,
+              spread: 0.0008, dmg: 60, mag: 20, reload: 7.5, g: 9.81 },
+    stat: { spd: 4.2, fire: 3.8, armor: 1.6 },
+    desc: '76mm 反坦克炮 · 高速轻型歼击车',
+  },
+  m4a3e8: {
+    id: 'm4a3e8', name: 'M4A3E8', full: 'M4A3E8 谢尔曼 中型坦克', tag: 'M4A3E8',
+    nation: 'us', era: 'ww2', role: 'mbt',
+    muzzlePair: false, trackDir: 1,
+    maxSpeed: 13.0, reverseSpeed: 5.0, turnRate: 2.10,
+    turretRate: 0.58, gunRate: 0.40,
+    gunMin: -0.08, gunMax: 0.25,
+    sight: [0, 2.60, 0.35],
+    weapon: { name: '76mm M1A2', short: '76mm', rpm: 7.0, v0: 792,
+              spread: 0.0008, dmg: 55, mag: 18, reload: 8.0, g: 9.81 },
+    stat: { spd: 3.0, fire: 3.6, armor: 2.8 },
+    desc: '76mm 长管 · 二战主力中型坦克',
+  },
+  m36: {
+    id: 'm36', name: 'M36', full: 'M36 杰克逊 坦克歼击车', tag: 'M36',
+    nation: 'us', era: 'ww2', role: 'td',
+    muzzlePair: false, trackDir: 1,
+    maxSpeed: 13.5, reverseSpeed: 5.2, turnRate: 2.10,
+    turretRate: 0.55, gunRate: 0.36,
+    gunMin: -0.08, gunMax: 0.25,
+    sight: [0, 2.45, 0.20],
+    weapon: { name: '90mm M3', short: '90mm', rpm: 5.5, v0: 853,
+              spread: 0.0007, dmg: 80, mag: 12, reload: 11.0, g: 9.81 },
+    stat: { spd: 3.0, fire: 4.4, armor: 2.2 },
+    desc: '90mm 反坦克炮 · 敞篷炮塔重锤',
+  },
+  m60: {
+    id: 'm60', name: 'M60', full: 'M60 巴顿 主战坦克', tag: 'M60',
+    nation: 'us', era: 'cold', role: 'mbt',
+    muzzlePair: false, trackDir: 1,
+    maxSpeed: 15.0, reverseSpeed: 6.0, turnRate: 2.10,
+    turretRate: 0.65, gunRate: 0.42,
+    gunMin: -0.10, gunMax: 0.30,
+    sight: [0, 2.45, 0.45],
+    weapon: { name: '105mm M68 线膛炮', short: '105mm', rpm: 7.0, v0: 1478,
+              spread: 0.0007, dmg: 62, mag: 20, reload: 8.5, g: 9.81 },
+    stat: { spd: 3.2, fire: 4.2, armor: 3.4 },
+    desc: '105mm 线膛炮 · 冷战西方主力',
   },
 
   /* ============================ 德国 ============================ */
@@ -2012,11 +2073,13 @@ const VEHICLES = {
   },
 };
 
-/* 按国家分组（对象字面量的键顺序就是列表顺序） */
+/* 按国家分组（对象字面量的键顺序就是列表顺序）
+   车库只显示 LIBRARY 里的首批车；其余注册条目保留给 ?veh= 直开。 */
 const VEH_BY_NATION = {};
 for (const n of NATION_ORDER) VEH_BY_NATION[n] = [];
-for (const id in VEHICLES) {
+for (const id of LIBRARY) {
   const v = VEHICLES[id];
+  if (!v) continue;
   (VEH_BY_NATION[v.nation] || (VEH_BY_NATION[v.nation] = [])).push(id);
 }
 const VEH_ORDER = NATION_ORDER.reduce((a, n) => a.concat(VEH_BY_NATION[n] || []), []);
@@ -2033,7 +2096,7 @@ let SELECTED_ID = null;
     只保留最近 VDATA_KEEP 辆（含 base64），其余交给 GC；切回去会重新注入。
     这就是 24 辆车也不会把内存撑爆的原因。                                   */
 
-const VDATA_KEEP = 3;              // 联机时可能同时有本地车 + 几个队友的车型
+const VDATA_KEEP = 6;              // 联机时可能同时有本地车 + 几个队友的车型
 const VEH_SRC = 'data/veh/';
 
 const VDATA       = new Map();   // id -> { meta, tex, geo }
@@ -4154,15 +4217,15 @@ function stepShell(s, dt, t){
       const rh = netRemoteHit([ax,ay,az], p);
       if(rh){
         if(s.mg){
-          /* 小口径单发伤害不足 1，先在本机累积，mgUpdate 每 0.3s 汇总 */
-          mg.hits.set(rh.slot, (mg.hits.get(rh.slot) || 0) + dmg);
+          /* 固定伤害：每发 8 HP，先在本机累积，mgUpdate 每 0.3s 汇总上报 */
+          mg.hits.set(rh.slot, (mg.hits.get(rh.slot) || 0) + NET_DMG_MG);
           spawnSparks(rh.point, 2, 0.65);
           if(Math.random() < 0.22) sndPing(rh.point, 0.26, 1.2);
         } else {
           hitFlash = 1.0;
           spawnSparks(rh.point, 8, 1.15);
           sndPing(rh.point, 0.55, 1.25);
-          netAfterHit(rh.slot, dmg);
+          netAfterHit(rh.slot, NET_DMG_MAIN);     // 主炮固定 250
         }
         s.alive = false;
         return;
@@ -4402,12 +4465,12 @@ function mgUpdate(t, dt){
     netOnMG(want, null, null, MG.cal);
   }
 
-  /* 联机伤害：每 0.3 s 汇总给房主，避免每发一条消息 */
+  /* 联机伤害：每 0.3 s 汇总给房主，避免每发一条消息（每发固定 8 HP） */
   if(mg.hits.size && t >= mg.hitT){
     mg.hitT = t + 0.3;
     for(const [slot, dmg] of mg.hits){
       const d = Math.round(dmg);
-      if(d >= 1) netAfterHit(slot, Math.min(60, d));
+      if(d >= 1) netAfterHit(slot, d);
     }
     mg.hits.clear();
   }
@@ -7583,15 +7646,16 @@ function updateHUD(now){
   if(elTmgBtn) elTmgBtn.style.display = MG ? '' : 'none';
   if(hudKill) hudKill.textContent = String(kills);
 
-  // 联机：自己的装甲 / 得分 / 受伤红框 / 阵亡倒计时
-  if(hudHpLine) hudHpLine.hidden = !NET.on;
-  if(NET.on){
+  // 战斗：自己的装甲 / 得分 / 受伤红框 / 阵亡倒计时
+  if(hudHpLine) hudHpLine.hidden = !STARTED;
+  if(STARTED){
     const mx = Math.max(1, NET.maxHp | 0);
     const hp = Math.max(0, NET.self.hp | 0);
     if(hudHpNum) hudHpNum.textContent = String(hp);
     if(hudHpFill){
       hudHpFill.style.width = (hp / mx * 100).toFixed(1) + '%';
       hudHpLine.classList.toggle('low', hp / mx < 0.35);
+      hudHpLine.classList.toggle('inv', (NET.self.invT || 0) > 0);
     }
     if(hudScore) hudScore.textContent = String(NET.self.score | 0);
   }
@@ -7745,7 +7809,8 @@ function writeLast(id){
 function initialVehicleId(){
   const q = Q.has('veh') ? String(Q.get('veh')).toLowerCase() : '';
   if(q && VEHICLES[q]) return q;
-  return readLast() || DEFAULT_ID;
+  const last = readLast();
+  return (last && LIBRARY.indexOf(last) >= 0) ? last : DEFAULT_ID;
 }
 
 const INITIAL_ID = initialVehicleId();
@@ -7886,6 +7951,10 @@ function startGame(){
   mouseDX = mouseDY = 0;              // 别把界面上的鼠标位移带进瞄准
   lockSkip = 0; lastCX = lastCY = null;
   garageEl.classList.add('hide');
+  if(typeof NET !== 'undefined') NET.lobby = false;   // 关掉房间面板
+  if(typeof renderNetPanel === 'function') renderNetPanel();
+  const pauseEl = document.getElementById('pause');
+  if(pauseEl) pauseEl.hidden = true;
   if(garageTimer){ clearInterval(garageTimer); garageTimer = 0; }
   const hint = document.getElementById('lockhint');
   if(hint && !NO_LOCK && AIM_WORLD) hint.style.opacity = '1';
@@ -7895,6 +7964,50 @@ function startGame(){
   netOnStart();                       // 联机：开始广播自己的状态
   tryLock();                        // 点击/回车都是用户手势，可以直接锁
 }
+
+/* ---------------- 返回车库 ---------------- */
+function stopGame(){
+  if(!STARTED) return;
+  STARTED = false;
+  document.body.classList.remove('playing');
+  garageEl.classList.remove('hide');
+  const pauseEl = document.getElementById('pause');
+  if(pauseEl) pauseEl.hidden = true;
+  if(document.exitPointerLock){ try{ document.exitPointerLock(); }catch(e){} }
+  /* 离开房间（房主退出 = 房间解散；客户端断线回大厅） */
+  try{ if(typeof netOnStop === 'function') netOnStop(); }catch(e){}
+  if(USE_MODEL){ if(garageTimer) clearInterval(garageTimer); garageTimer = setInterval(updateGarageLoad, 150); }
+  else updateGarageLoad();
+}
+
+/* ---------------- Esc 暂停面板 ---------------- */
+function showPause(){
+  if(!STARTED) return;
+  const el = document.getElementById('pause');
+  if(!el) return;
+  el.hidden = false;
+  const t = document.getElementById('pauseRoom');
+  if(t) t.textContent = (typeof NET !== 'undefined' && NET.on)
+    ? '房间 ' + String(NET.code || '').toUpperCase() + ' · ' + NET_MEMBERS.length + '/' + NET_MAX
+    : '单人 · 白模试验场';
+}
+
+(function(){
+  const resume = document.getElementById('pauseResume');
+  const back   = document.getElementById('pauseGarage');
+  if(resume) resume.addEventListener('click', e => {
+    e.currentTarget.blur();
+    const el = document.getElementById('pause');
+    if(el) el.hidden = true;
+    tryLock();
+  });
+  if(back) back.addEventListener('click', e => { e.currentTarget.blur(); stopGame(); });
+  addEventListener('keydown', e => {
+    if(e.code !== 'Escape' || !STARTED) return;
+    /* 浏览器已经释放了指针锁，这里只负责把面板亮出来 */
+    showPause();
+  });
+})();
 
 /* ---------------- 应用一辆车 ---------------- */
 /*  参数、模型、枢轴、炮口、俯仰限位、武器、HUD 一起换。
@@ -8002,12 +8115,11 @@ addEventListener('keydown', e => {
     cycleNation(1);
     e.preventDefault();
   } else if(k === 'Enter' || k === 'NumpadEnter'){
-    if(netLobbyOpen() && !NET.on) return;   // 大厅展开但没连上：回车不偷偷进单机
-    startGame();                            // 已连上房间：回车 = 进入联机场地
+    if(!netLobbyOpen()) netOpenLobby();     // 回车 = 打开房间面板
     e.preventDefault();
   }
 });
-goEl.addEventListener('click', startGame);   // 「单机测试」
+goEl.addEventListener('click', () => { netOpenLobby(); });   // 「进入测试」→ 创建 / 加入房间
 
 /* ===================== 87_net.js ===================== */
 /* ============================ 联机（PeerJS P2P） ============================ */
@@ -8034,8 +8146,12 @@ const NET_BACK    = 0.12;       // 远端插值缓冲（秒）
 const NET_TIMEOUT = 3000;       // 多久没收到包就不画这辆车（毫秒）
 const NET_SLOT_COL = ['#ffb054', '#7fd4ff', '#9ef08a', '#ff9ec4'];
 
-/* 战斗（M1）：房主结算 HP / 击杀 / 得分，客户端本地判定命中再上报 */
-const NET_RESPAWN  = 4.0;                 // 阵亡后重生等待（秒）
+/* 战斗：房主结算 HP / 击杀 / 得分，客户端本地判定命中再上报 */
+const NET_RESPAWN  = 5.0;                 // 阵亡后重生等待（秒）
+const NET_INVULN   = 2.0;                 // 重生保护（秒）
+const NET_HP       = 1000;                // 整车统一血量
+const NET_DMG_MAIN = 250;                 // 主炮固定伤害（4 发击毁）
+const NET_DMG_MG   = 8;                   // 车顶机枪每发固定伤害
 const NET_SPAWN_X  = [-12, -4, 4, 12];    // 四个人分开出生，避免一开场就叠在一起
 const NET_SPAWN_Z  = 6;
 const NET_HULL_R   = 1.55;                // 车体碰撞：前后两个圆
@@ -8050,14 +8166,16 @@ const NET = {
   peer: null,
   hostConn: null,
   conns: new Map(),    // peerId -> DataConnection（房主：所有客户端；客户端：只有房主）
-  clients: new Map(),  // peerId -> { slot, name, veh, hp, score, dead, conn }（仅房主用）
+  clients: new Map(),  // peerId -> { slot, name, veh, hp, score, dead, ready, invT, conn }（仅房主用）
   started: false,      // 进入场地之后才开始发状态
+  running: false,      // 房间是否已经开始战斗（准备/开始流程）
+  ready: false,        // 自己的准备状态（客户端）
   busy: false,         // 正在连信令/连房主（按钮禁用）
-  lobby: false,        // 车库底部的联机大厅是否展开
+  lobby: false,        // 房间面板是否展开
 
   /* 自己的战斗状态（房主权威；客户端以房主下发的为准） */
-  self: { hp: 100, score: 0, dead: false },
-  maxHp: 100,
+  self: { hp: NET_HP, score: 0, dead: false, invT: 0 },
+  maxHp: NET_HP,
   deadT: 0,
   spawnT: 0,
   lastKiller: '',
@@ -8092,7 +8210,7 @@ function netCode(){
 }
 
 function netClean(code){
-  return String(code || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8);
+  return String(code || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 5);
 }
 
 function netAvailable(){ return typeof Peer !== 'undefined'; }
@@ -8133,11 +8251,9 @@ function netBinView(d){
 
 /* ---------------------------------------------------------------- 战斗工具 */
 
-/* 血量按装甲值缩放：armor 2.2 → 123，3.4 → 141，4.8 → 162 */
+/* 统一血量：不看车型、不看装甲、不看命中部位 */
 function netMaxHp(id){
-  const V = VEHICLES[id] || {};
-  const ar = (V.stat && V.stat.armor) || 3;
-  return Math.round(90 + ar * 15);
+  return NET_HP;
 }
 
 /* 房主：slot -> 可写状态记录（自己 / 某个客户端） */
@@ -8338,11 +8454,10 @@ function netUpdateMG(t, dt){
 function netLobbyOpen(){ return !!NET.lobby; }
 
 function netOpenLobby(){
+  if(STARTED) return;
   NET.lobby = true;
-  if(!NET.on && !NET.busy) netSetStatus('未连接');
+  if(!NET.on && !NET.busy) netSetStatus('选择：创建房间 / 加入房间');
   renderNetPanel();
-  const box = netEl('netlobby');
-  if(box && box.scrollIntoView) box.scrollIntoView({ block: 'nearest' });
 }
 
 function netCloseLobby(){
@@ -8360,6 +8475,40 @@ function netLeaveRoom(){
   netSetStatus('已离开房间');
 }
 
+/* 客户端：准备 / 取消准备 */
+function netToggleReady(){
+  if(!NET.on || NET.role === 'host' || NET.busy) return;
+  NET.ready = !NET.ready;
+  if(NET.hostConn && NET.hostConn.open){
+    try{ NET.hostConn.send({ t: 'ready', ready: NET.ready }); }catch(e){}
+  }
+  renderNetPanel();
+  netSetStatus(NET.ready ? '已准备，等待房主开始' : '取消准备');
+}
+
+/* 房主：开始战斗（所有客户端都准备后才能开始；一个人也能直接开始） */
+function netStartBattle(){
+  if(!NET.on || NET.role !== 'host' || NET.busy) return;
+  if(NET.running) return;
+  for(const p of NET.clients.values()){
+    if(!p.ready){ netSetStatus('还有玩家未准备', true); return; }
+  }
+  NET.running = true;
+  netBroadcast({ t: 'start' });
+  netBroadcastRoster();
+  startGame();
+}
+
+/* 单人测试：不建房间、不走 PeerJS，双击 file:// / 离线也能直接进白模场 */
+function netSoloStart(){
+  if(NET.on || NET.busy) return;
+  NET.lobby = false;
+  NET.ready = true;
+  NET.running = true;
+  renderNetPanel();
+  startGame();
+}
+
 function netInit(){
   const nameEl = netEl('netName');
   if(nameEl){
@@ -8373,24 +8522,22 @@ function netInit(){
     });
   }
 
-  const bOpen   = netEl('goNet');
-  const bEnter  = netEl('netEnter');
   const bCreate = netEl('netCreate');
   const bJoin   = netEl('netJoin');
+  const bSoloT  = netEl('netSolo');
   const bBack   = netEl('netBack');
   const bLeave  = netEl('netLeave');
+  const bReady  = netEl('netReady');
+  const bStart  = netEl('netStart');
   const codeEl  = netEl('netCode');
 
-  if(bOpen) bOpen.addEventListener('click', e => {
-    e.currentTarget.blur();
-    if(NET.on) return;
-    if(NET.lobby) netCloseLobby(); else netOpenLobby();
-  });
-  if(bEnter)  bEnter.addEventListener('click', e => { e.currentTarget.blur(); startGame(); });
   if(bCreate) bCreate.addEventListener('click', e => { e.currentTarget.blur(); netCreate(); });
   if(bJoin)   bJoin.addEventListener('click', e => { e.currentTarget.blur(); netJoin(codeEl && codeEl.value); });
+  if(bSoloT)  bSoloT.addEventListener('click', e => { e.currentTarget.blur(); netSoloStart(); });
   if(bBack)   bBack.addEventListener('click', e => { e.currentTarget.blur(); netCloseLobby(); });
   if(bLeave)  bLeave.addEventListener('click', e => { e.currentTarget.blur(); netLeaveRoom(); });
+  if(bReady)  bReady.addEventListener('click', e => { e.currentTarget.blur(); netToggleReady(); });
+  if(bStart)  bStart.addEventListener('click', e => { e.currentTarget.blur(); netStartBattle(); });
   if(codeEl)  codeEl.addEventListener('keydown', e => {
     if(e.key === 'Enter'){ e.preventDefault(); netJoin(codeEl.value); }
     e.stopPropagation();
@@ -8441,41 +8588,51 @@ function netApplyUI(){
   const form    = netEl('netForm');
   const room    = netEl('netRoom');
   const bSolo   = netEl('go');
-  const bOpen   = netEl('goNet');
-  const bEnter  = netEl('netEnter');
   const bCreate = netEl('netCreate');
   const bJoin   = netEl('netJoin');
+  const bSoloT  = netEl('netSolo');
   const bBack   = netEl('netBack');
+  const bReady  = netEl('netReady');
+  const bStart  = netEl('netStart');
   const codeEl  = netEl('netCode');
   const nameEl  = netEl('netName');
 
-  /* 大厅只有点「联机测试」才出现 */
   if(lobby)  lobby.hidden  = !NET.lobby;
   const gEl = netEl('garage');
   if(gEl) gEl.classList.toggle('lobby', !!NET.lobby);
   if(form)   form.hidden   = NET.on;
   if(room)   room.hidden   = !NET.on;
 
-  /* 底部按钮：连上房间后只留「进入联机场地」 */
+  /* 车库底部只有一个「进入测试」；房间面板打开时禁用 */
   if(bSolo){
-    bSolo.hidden = NET.on;
-    bSolo.disabled = NET.busy;        // 正在连房间时别切去单机
+    bSolo.disabled = NET.busy || NET.lobby;
   }
-  if(bOpen){
-    bOpen.hidden = NET.on;
-    bOpen.classList.toggle('on', NET.lobby && !NET.on);
-  }
-  if(bEnter) bEnter.hidden = !NET.on;
 
   const dis = NET.busy;               // 连接中锁住输入
   if(bCreate) bCreate.disabled = dis;
   if(bJoin)   bJoin.disabled   = dis;
+  if(bSoloT)  bSoloT.disabled  = dis;
   if(codeEl)  codeEl.disabled  = dis;
   if(nameEl)  nameEl.disabled  = dis;
-  if(bBack)   bBack.hidden     = NET.on;
+  if(bBack)   bBack.disabled   = dis;
+
+  /* 准备/开始：房主看到开始，客户端看到准备 */
+  const isHost = NET.role === 'host';
+  if(bReady){
+    bReady.hidden = !NET.on || isHost;
+    bReady.classList.toggle('on', !!NET.ready);
+    bReady.textContent = NET.ready ? '已准备' : '准备';
+  }
+  if(bStart) bStart.hidden = !NET.on || !isHost;
 
   const hint = netEl('netHint');
   if(hint) hint.hidden = NET.on;
+  const rh = netEl('netRoomHint');
+  if(rh){
+    if(!NET.on) rh.textContent = '';
+    else if(isHost) rh.textContent = NET.clients.size ? '等待所有玩家准备' : '单人也能直接开始';
+    else rh.textContent = NET.ready ? '等待房主开始' : '点「准备」告诉房主';
+  }
 }
 
 function renderNetPanel(){
@@ -8484,7 +8641,7 @@ function renderNetPanel(){
   const codeEl = netEl('netRoomCode');
   const roleEl = netEl('netRole');
 
-  if(codeEl) codeEl.textContent = NET.code || '—';
+  if(codeEl) codeEl.textContent = NET.code ? NET.code.toUpperCase() : '—';
   if(roleEl) roleEl.textContent = NET.role === 'host' ? '房主'
                                 : NET.role ? '成员' : '—';
 
@@ -8495,11 +8652,13 @@ function renderNetPanel(){
       roster.innerHTML = NET_MEMBERS.map(m => {
         const V = VEHICLES[m.veh] || {};
         const me = m.slot === NET.slot;
-        const hp = Math.max(0, m.hp | 0);
-        return `<span class="np${me ? ' me' : ''}${m.dead ? ' dead' : ''}" style="--sc:${NET_SLOT_COL[(m.slot - 1) & 3]}">` +
+        const host = (m.slot | 0) === 1;
+        const rdy = host || m.ready || m.dead;
+        const st = m.dead ? '击毁' : host ? '房主' : (m.ready ? '已准备' : '未准备');
+        return `<span class="np${me ? ' me' : ''}${m.dead ? ' dead' : ''}${rdy ? ' rdy' : ''}" style="--sc:${NET_SLOT_COL[(m.slot - 1) & 3]}">` +
                `<i>${m.slot}</i>${netEsc(m.name || '玩家')}` +
                `<em>${netEsc(V.name || '—')}</em>` +
-               `<u>${m.dead ? '击毁' : hp}</u></span>`;
+               `<u>${st}</u></span>`;
       }).join('');
     }
   }
@@ -8510,7 +8669,8 @@ function renderNetPanel(){
       game.hidden = false;
       const t = netEl('ngTitle');
       const l = netEl('ngList');
-      if(t) t.textContent = NET.code + (NET.role === 'host' ? ' · 房主' : ' · 联机');
+      if(t) t.textContent = '房间 ' + String(NET.code || '').toUpperCase() +
+                            ' · ' + NET_MEMBERS.length + '/' + NET_MAX;
       if(l) l.innerHTML = NET_MEMBERS.map(m => {
         const V = VEHICLES[m.veh] || {};
         const me = m.slot === NET.slot;
@@ -8562,8 +8722,10 @@ function netDestroy(){
   NET.clients.clear();
   NET.hostConn = null;
   if(NET.peer){ try{ NET.peer.destroy(); }catch(e){} NET.peer = null; }
-  NET.on = false; NET.role = null; NET.slot = 0; NET.code = ''; NET.started = false; NET.busy = false;
-  NET.self.hp = NET.maxHp; NET.self.score = 0; NET.self.dead = false;
+  NET.on = false; NET.role = null; NET.slot = 0; NET.code = ''; NET.started = false;
+  NET.running = false; NET.ready = false; NET.busy = false;
+  NET.maxHp = NET_HP;
+  NET.self.hp = NET.maxHp; NET.self.score = 0; NET.self.dead = false; NET.self.invT = 0;
   NET.deadT = 0; NET.dmgFlash = 0; NET.lastKiller = ''; NET.spawnT = 0;
   REMOTES.clear();
   NET_SNAP.clear();
@@ -8622,10 +8784,13 @@ function netMakeHost(code, tries){
     NET.on = true;
     NET.busy = false;
     NET.slot = 1;
+    NET.ready = true;              // 房主天然已准备
+    NET.running = false;           // 房间创建后还没开始
     NET.maxHp = netMaxHp(SELECTED_ID);
     NET.self.hp = NET.maxHp;
     NET.self.score = 0;
     NET.self.dead = false;
+    NET.self.invT = 0;
     NET.deadT = 0;
     NET.lastKiller = '';
     NET_MEMBERS = netMembers();
@@ -8692,6 +8857,8 @@ function netHostData(conn, d){
       hp: netMaxHp(veh),
       score: 0,
       dead: false,
+      ready: false,
+      invT: 0,
       conn,
     };
     NET.clients.set(conn.peer, p);
@@ -8700,12 +8867,21 @@ function netHostData(conn, d){
       conn.send({
         t: 'welcome',
         slot,
+        running: !!NET.running,
         members: netMembers(),
         snap: netSnapshot(),
       });
     }catch(e){}
     netBroadcastRoster();
     netFeed(p.name + ' 加入了');
+    return;
+  }
+
+  if(d && d.t === 'ready'){
+    const p = NET.clients.get(conn.peer);
+    if(!p) return;
+    p.ready = !!d.ready;
+    netBroadcastRoster();
     return;
   }
 
@@ -8755,6 +8931,7 @@ function netHostData(conn, d){
     if(!p || !p.dead) return;
     p.dead = false;
     p.hp = netMaxHp(p.veh);
+    p.invT = NET_INVULN;          // 原地复活 → 2 秒无敌
     netBroadcast({ t: 'spawn', slot: p.slot });
     netBroadcastRoster();
     return;
@@ -8801,10 +8978,12 @@ function netBroadcastRoster(){
 
 function netMembers(){
   const list = [{ slot: 1, name: NET.name, veh: SELECTED_ID,
-                  hp: NET.self.hp, score: NET.self.score | 0, dead: !!NET.self.dead }];
+                  hp: NET.self.hp, score: NET.self.score | 0, dead: !!NET.self.dead,
+                  ready: true }];
   for(const p of NET.clients.values())
     list.push({ slot: p.slot, name: p.name, veh: p.veh,
-                hp: p.hp, score: p.score | 0, dead: !!p.dead });
+                hp: p.hp, score: p.score | 0, dead: !!p.dead,
+                ready: !!p.ready });
   list.sort((a, b) => a.slot - b.slot);
   return list;
 }
@@ -8828,8 +9007,10 @@ function netHostDamage(toSlot, dmg, bySlot){
   if(NET.role !== 'host' || !NET.on) return;
   const r = netRec(toSlot);
   if(!r || r.dead) return;
+  if((r.invT || 0) > 0) return;          // 重生保护：打不掉血
 
-  dmg = Math.max(1, Math.min(60, Math.round(+dmg || 10)));
+  /* 固定伤害：主炮 250 / 机枪 8。不看部位、不看穿深、不看车型 */
+  dmg = Math.max(1, Math.round(+dmg || NET_DMG_MAIN));
   r.hp = Math.max(0, r.hp - dmg);
 
   /* 受击方立即收到 HP，红屏和阵亡不用等 roster */
@@ -8873,11 +9054,12 @@ function netShowKill(vslot, kslot, vname, kname){
   }
 }
 
-/* 阵亡：炸一下、停住、等 4 秒重生。单机不会走到这里 */
+/* 阵亡：炸一下、原地停住，等 NET_RESPAWN 秒后原地满血复活 */
 function netDie(byName){
   if(NET.self.dead) return;
   NET.self.dead = true;
   NET.self.hp = 0;
+  NET.self.invT = 0;
   NET.deadT = 0;
   NET.lastKiller = byName || '';
   car.v = 0; car.yawRate = 0; car.vL = car.vR = 0;
@@ -8890,9 +9072,12 @@ function netRespawn(){
   if(!NET.self.dead) return;
   NET.self.dead = false;
   NET.self.hp = NET.maxHp;
+  NET.self.invT = NET_INVULN;        // 重生保护：2 秒无敌
   NET.deadT = 0;
-  NET.spawnT = 1.0;              // 重生保护：这段时间忽略迟到的「已阵亡」名单
-  netSpawnSelf();
+  NET.spawnT = 0;
+  /* 原地复活：位置不动，只清速度 */
+  car.v = 0; car.yawRate = 0; car.vL = car.vR = 0;
+  input.fire = false;
   if(NET.on){
     if(NET.role === 'host'){
       netBroadcast({ t: 'spawn', slot: 1 });
@@ -8990,17 +9175,22 @@ function netSelfFrom(rec){
   NET.self.hp = hp;
   NET.self.score = rec.score | 0;
 
-  if(rec.dead && !wasDead && (NET.spawnT || 0) <= 0){
+  if(rec.dead && !wasDead && (NET.self.invT || 0) <= 0 && (NET.spawnT || 0) <= 0){
     netDie('');
   } else if(!rec.dead){
     NET.self.dead = false;
   }
 }
 
-/* 每帧：受伤红框衰减 + 阵亡倒计时 */
+/* 每帧：受伤红框衰减 + 无敌倒计时 + 阵亡倒计时 */
 function netTick(dt){
   if(NET.dmgFlash > 0) NET.dmgFlash = Math.max(0, NET.dmgFlash - dt * 2.2);
   if(NET.spawnT > 0) NET.spawnT = Math.max(0, NET.spawnT - dt);
+  if(NET.self.invT > 0) NET.self.invT = Math.max(0, NET.self.invT - dt);
+  if(NET.role === 'host' && NET.clients.size){
+    for(const p of NET.clients.values())
+      if(p.invT > 0) p.invT = Math.max(0, p.invT - dt);
+  }
   if(NET.self.dead){
     NET.deadT += dt;
     if(NET.deadT >= NET_RESPAWN) netRespawn();
@@ -9012,6 +9202,7 @@ function netTick(dt){
 function netJoin(codeIn){
   const code = netClean(codeIn);
   if(!code){ netSetStatus('请输入房间码', true); return; }
+  if(code.length !== 5){ netSetStatus('房间码是 5 位', true); return; }
   if(NET.on || NET.busy) return;
   netSyncName();
   NET.busy = true;
@@ -9086,17 +9277,29 @@ function netClientData(peer, d){
     NET.on = true;
     NET.busy = false;
     NET.slot = d.slot | 0;
+    NET.running = !!d.running;
+    NET.ready = false;               // 新房间：先未准备
     NET_MEMBERS = d.members || [];
     NET.self.dead = false;
+    NET.self.invT = 0;
     NET.deadT = 0;
     NET.self.hp = netMaxHp(SELECTED_ID);
     const me = NET_MEMBERS.find(m => (m.slot | 0) === NET.slot);
     if(me) netSelfFrom(me);
     if(Array.isArray(d.snap)) for(const s of d.snap) netApplySnap(s);
-    if(STARTED){ netSpawnSelf(); netSendState(); }   // ?room=&veh= 直接开局的调试路径
+    /* ?room=&veh= 直接开局；或房间已经在战斗中（中途加入） */
+    if(d.running && !STARTED) startGame();
+    else if(STARTED){ netSpawnSelf(); netSendState(); }
     renderNetPanel();
-    netSetStatus('已加入房间');
+    netSetStatus(d.running ? '已加入，战斗进行中' : '已加入房间，点「准备」');
     netStartSending();
+    return;
+  }
+  if(d && d.t === 'start'){
+    NET.running = true;
+    if(!STARTED) startGame();
+    renderNetPanel();
+    netSetStatus('战斗开始');
     return;
   }
   if(d && d.t === 'roster'){
@@ -9374,7 +9577,9 @@ function netOnStart(){
   NET.started = true;
   if(NET.on){
     NET.self.dead = false;
+    NET.self.invT = 0;
     NET.deadT = 0;
+    NET.spawnT = 0;
     NET.dmgFlash = 0;
     NET.maxHp = netMaxHp(SELECTED_ID);
     NET.self.hp = NET.maxHp;
@@ -9382,6 +9587,16 @@ function netOnStart(){
     netSendState();
     renderNetPanel();          // 显示右上角房间面板
   }
+}
+
+/* 返回车库：离开房间（房主退出 = 房间解散） */
+function netOnStop(){
+  NET.started = false;
+  NET.running = false;
+  if(NET.on || NET.busy) netDestroy();
+  NET.lobby = false;
+  renderNetPanel();
+  netSetStatus('单机模式');
 }
 
 /* 启动时 ?room= 自动加入 */
