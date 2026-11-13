@@ -2668,7 +2668,7 @@ function modelPartMat(part, P, mats, travelL, travelR){
       const wz = vm[2]*w.c[0] + vm[6]*w.c[1] + vm[10]*w.c[2] + vm[14];
       /* 目标：轮心在「当地地面 + 模型原始轮心高度」；差值就是这一根悬挂的行程 */
       dy = (groundH(wx, wz) + w.c[1]) - wy;
-      if(dy > 0.16) dy = 0.16; else if(dy < -0.16) dy = -0.16;
+      if(dy > 0.18) dy = 0.18; else if(dy < -0.18) dy = -0.18;
     }
     return M4.mul(M4.mul(mats.vehM, M4.translate(w.c[0], w.c[1] + dy, w.c[2])), M4.rotX(ang));
   }
@@ -6519,8 +6519,8 @@ var RAPIER = (function(){
 
 const PHYS_DT      = 1 / 120;     // 固定物理步
 const PHYS_SAG     = 0.20;        // 静态下沉（m）——越大越软
-const PHYS_L0      = 0.30;        // 悬挂自由长度（m）
-const PHYS_TRAVEL  = 0.32;        // 最大行程（m）
+const PHYS_L0      = 0.46;        // 悬挂自由长度（m）
+const PHYS_TRAVEL  = 0.46;        // 最大行程（m）——长行程吸落地冲击
 const PHYS_MU      = 2.0;         // 履带附着系数（frictionSlip）
 const PHYS_SIDE    = 0.80;        // 侧向摩擦刚度（越小转得越轻快）
 
