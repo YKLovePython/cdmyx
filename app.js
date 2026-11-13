@@ -4879,8 +4879,8 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
     <div id="tfire" class="tbtn">开火</div>
     <div id="taim" class="tbtn">炮镜</div>
     <div id="tfree" class="tbtn">视角</div>
-    <div id="tcrF" class="tbtn">巡航＋</div>
-    <div id="tcrR" class="tbtn">巡航−</div>
+    <div id="tcrF" class="tbtn">巡航+</div>
+    <div id="tcrR" class="tbtn">巡航-</div>
     <div id="tchint">左摇杆驾驶 · 屏上拖动瞄准</div>
     <div id="trot">点此横屏</div>
     <div id="tflip">⇄ 翻转</div>
@@ -5414,13 +5414,13 @@ function updateSim(t, dt){
   } else if(!STARTED){
     // 选车界面：绕车缓慢环绕展示
     const a = t * 0.32 + 2.5;
-    const dist = Math.max(14, zoom + 3);
-    cam.yaw = a - 0.26;              // 车偏到画面右侧，左侧留给选车面板
+    const dist = Math.max(13, zoom + 3);
+    cam.yaw = a - 0.20;              // 车偏到画面右侧，左侧留给选车面板
     cam.pitch = -0.11;               // 稍微俯视
     const cp2 = Math.cos(cam.pitch);
-    cam.pos[0] += (car.pos[0] + Math.sin(a) * dist * cp2 - cam.pos[0]) * Math.min(1, dt * 4);
+    cam.pos[0] += (car.pos[0] - Math.sin(a) * dist * cp2 - cam.pos[0]) * Math.min(1, dt * 4);
     cam.pos[1] += (3.10 - cam.pos[1]) * Math.min(1, dt * 4);
-    cam.pos[2] += (car.pos[2] + Math.cos(a) * dist * cp2 - cam.pos[2]) * Math.min(1, dt * 4);
+    cam.pos[2] += (car.pos[2] - Math.cos(a) * dist * cp2 - cam.pos[2]) * Math.min(1, dt * 4);
     cam.fov = 44;
   } else if(input.sniper){
     // 炮镜视角：眼点在瞄具上，视线沿「瞄准方向」而不是炮管（炮管追上来时能看到炮口圈在动）
@@ -5648,7 +5648,98 @@ const elRng  = document.getElementById('range');
 const elHit  = document.getElementById('hitmark');
 const elFeed = document.getElementById('feed');
 const elTLoad = document.getElementById('tload');
+const elCompTrack = document.getElementById('compassTrack');
+const elCompass   = document.getElementById('compass');
+const elMini      = document.getElementById('minimap');
+const miniCtx     = (elMini && elMini.getContext) ? elMini.getContext('2d') : null;
+const elReload    = document.querySelector('#reloadbar u');
+const elAmmoMeta  = document.querySelector('#ammometa span');
+const ammoBox     = document.getElementById('ammobox');
 if(BENCH) benchEl.style.display = 'block';
+
+/* ---- 顶部罗盘：先铺一条 -180°..540° 的刻度带，按相机朝向平移 ---- */
+const COMPASS_S = 2.2;          // 每度像素
+(function buildCompass(){
+  if(!elCompTrack) return;
+  let h = '';
+  for(let d = -180; d <= 540; d += 5){
+    const dd = ((d % 360) + 360) % 360;
+    const major = dd % 30 === 0;
+    const lab = dd === 0 ? 'N' : dd === 90 ? 'E' : dd === 180 ? 'S' : dd === 270 ? 'W' : '';
+    h += `<i class="${major ? 'm' : ''}" style="left:${((d + 180) * COMPASS_S).toFixed(1)}px">` +
+         (lab ? `<b>${lab}</b>` : (major ? `<b class="num">${String(dd).padStart(3, '0')}</b>` : '')) +
+         `</i>`;
+  }
+  elCompTrack.innerHTML = h;
+})();
+
+function updateCompass(){
+  if(!elCompTrack || !elCompass) return;
+  const yaw = Math.atan2(cam.fwd[0], cam.fwd[2]);
+  let h = (yaw * 180 / Math.PI) % 360;
+  if(h < 0) h += 360;
+  const half = elCompass.clientWidth * 0.5;
+  elCompTrack.style.transform =
+    `translateX(${(half - (h + 180) * COMPASS_S).toFixed(1)}px)`;
+}
+
+/* ---- 小地图：北朝上，中心是自己，视野 260 m ---- */
+const MM_M = 260;
+let mmTick = 0;
+function drawMinimap(){
+  const g = miniCtx;
+  if(!g) return;
+  const S = 240, C = 120, k = S / MM_M;
+  g.clearRect(0, 0, S, S);
+  g.fillStyle = 'rgba(9,11,12,.55)';
+  g.fillRect(0, 0, S, S);
+
+  g.strokeStyle = 'rgba(255,255,255,.05)';
+  g.lineWidth = 1;
+  g.beginPath();
+  for(let i = 1; i < 4; i++){
+    const p = Math.round(i * S / 4) + 0.5;
+    g.moveTo(p, 0); g.lineTo(p, S);
+    g.moveTo(0, p); g.lineTo(S, p);
+  }
+  g.stroke();
+
+  g.strokeStyle = 'rgba(255,255,255,.09)';
+  g.beginPath(); g.arc(C, C, 100 * k, 0, 6.2832); g.stroke();
+
+  const px = car.pos[0], pz = car.pos[2];
+  const sx = x => C + (x - px) * k;
+  const sz = z => C - (z - pz) * k;
+
+  for(const tg of TARGETS){
+    const x = sx(tg.x), y = sz(tg.z);
+    if(x < -8 || x > S + 8 || y < -8 || y > S + 8) continue;
+    const up = tg.state === 'up';
+    g.fillStyle = up ? 'rgba(232,236,232,.68)' : 'rgba(232,236,232,.2)';
+    const s = up ? 4 : 3;
+    g.fillRect(x - s * 0.5, y - s * 0.5, s, s);
+  }
+
+  if(typeof NET_SNAP !== 'undefined'){
+    for(const [slot, s] of NET_SNAP){
+      if(slot === NET.slot) continue;
+      const x = sx(s.x), y = sz(s.z);
+      if(x < -8 || x > S + 8 || y < -8 || y > S + 8) continue;
+      g.fillStyle = NET_SLOT_COL[(slot - 1) & 3] || '#c9a86b';
+      g.beginPath(); g.arc(x, y, 3.2, 0, 6.2832); g.fill();
+    }
+  }
+
+  g.save();
+  g.translate(C, C);
+  g.rotate(car.yaw);
+  g.fillStyle = '#f0dcae';
+  g.beginPath();
+  g.moveTo(0, -5.5); g.lineTo(3.6, 4); g.lineTo(0, 2); g.lineTo(-3.6, 4);
+  g.closePath(); g.fill();
+  g.restore();
+}
+
 
 let simT = 0;
 let last = performance.now();
@@ -6320,7 +6411,8 @@ function updateHUD(now){
   if(hudSpd) hudSpd.textContent = (Math.abs(v) * 3.6).toFixed(1);
   if(hudCruise){
     hudCruise.textContent = cruise === 0 ? '关' : (cruise > 0 ? '前' : '倒') + Math.abs(cruise) + '档';
-    hudCruise.style.color = cruise === 0 ? '' : (cruiseFlash > 0 ? '#ffe6c2' : 'rgba(255,196,120,.95)');
+    hudCruise.style.color = cruise === 0 ? 'rgba(223,227,226,.4)'
+      : (cruiseFlash > 0 ? '#f6e7c6' : '#c9a86b');
   }
   if(TOUCH){
     const ta = document.getElementById('taim');
@@ -6404,11 +6496,18 @@ function updateHUD(now){
   }
 
   // 弹药 / 击杀
-  if(hudAmmo){
-    hudAmmo.textContent = weapon.reloading > 0
-      ? '换弹 ' + weapon.reloading.toFixed(1) + 's'
-      : weapon.ammo + ' 发';
+  if(hudAmmo) hudAmmo.textContent = String(weapon.ammo);
+  if(elReload){
+    const rl = Math.max(0.001, WPN.reload || 1);
+    const k = weapon.reloading > 0 ? 1 - weapon.reloading / rl : 1;
+    elReload.style.width = (k * 100).toFixed(0) + '%';
   }
+  if(elAmmoMeta){
+    elAmmoMeta.textContent = weapon.reloading > 0
+      ? '换弹 ' + weapon.reloading.toFixed(1) + ' s'
+      : (WPN.short || '') + ' · 待发';
+  }
+  if(ammoBox) ammoBox.classList.toggle('reloading', weapon.reloading > 0);
   if(hudKill) hudKill.textContent = String(kills);
 
   // 联机：自己的装甲 / 得分 / 受伤红框 / 阵亡倒计时
@@ -6450,6 +6549,12 @@ function updateHUD(now){
       s += `<div style="opacity:${a.toFixed(2)}">${f.txt}</div>`;
     }
     if(s !== elFeed.__last){ elFeed.innerHTML = s; elFeed.__last = s; }
+  }
+
+  /* 罗盘 / 小地图（小地图 20 Hz 就够了） */
+  if(STARTED){
+    updateCompass();
+    if((mmTick++ % 3) === 0) drawMinimap();
   }
 
   if(BENCH){
@@ -6514,6 +6619,10 @@ window.__ready = false;
 const garageEl   = document.getElementById('garage');
 const gridEl     = document.getElementById('grid');
 const gnameEl    = document.getElementById('gname');
+const gfullEl    = document.getElementById('gfull');
+const gchipsEl   = document.getElementById('gchips');
+const gweapEl    = document.getElementById('gweap');
+const gstatsEl   = document.getElementById('gstats');
 const gdescEl    = document.getElementById('gdesc');
 const gbarEl     = document.querySelector('#gbar i');
 const gloadEl    = document.getElementById('gload');
@@ -6522,16 +6631,22 @@ const gnationsEl = document.getElementById('gnations');
 
 const LAST_KEY = 'cdmyx.last';
 
+const ROLE_CHAR = {
+  mbt: '主', light: '轻', td: '歼', spaa: '高',
+  wheeled: '轮', ifv: '步', spg: '火', rocket: '箭',
+};
+
 const gcards = new Map();      // id -> 卡片
 let garageIdx = 0;
 let garageTimer = 0;
 let selToken = 0;              // 切车令牌：晚到的加载结果直接丢掉
 let loadState = 'idle';        // idle | loading | ready | error | proc | empty
 
-/* 把 0..5 的数值画成一根短条 */
+/* 把 0..5 的数值画成一行「标签 + 条 + 数字」 */
 function vstat(label, v){
   const p = Math.max(0, Math.min(1, v / 5)) * 100;
-  return `<div class="vstat">${label}<i><b style="width:${p.toFixed(0)}%"></b></i></div>`;
+  return `<div class="gst"><span>${label}</span><i><u style="width:${p.toFixed(0)}%"></u></i>` +
+         `<b>${v.toFixed(1)}</b></div>`;
 }
 
 /* ---------------- 上次选择 ---------------- */
@@ -6576,7 +6691,7 @@ function buildNationTabs(){
     b.className = 'gnat';
     b.dataset.nation = n;
     b.style.setProperty('--nc', N.color);
-    b.innerHTML = `<b>${N.short}</b><span>${N.name}</span><i>${VEH_BY_NATION[n].length}</i>`;
+    b.innerHTML = `<b>${N.short}</b>${N.name}<i>${VEH_BY_NATION[n].length}</i>`;
     b.addEventListener('click', () => { if(n !== curNation) setNation(n); });
     gnationsEl.appendChild(b);
   }
@@ -6587,7 +6702,8 @@ function syncNationUI(){
   garageEl.style.setProperty('--nc', N.color);
   for(const b of gnationsEl.children) b.classList.toggle('sel', b.dataset.nation === curNation);
   const k = document.getElementById('gkicker');
-  if(k) k.textContent = 'Combat Test Range · ' + N.name;
+  const n = (VEH_BY_NATION[curNation] || []).length;
+  if(k) k.textContent = N.name + ' · ' + n + ' 辆';
 }
 
 /* ---------------- 卡片 ---------------- */
@@ -6599,16 +6715,12 @@ function buildGrid(){
     const v = VEHICLES[id];
     const el = document.createElement('button');
     el.type = 'button';
-    el.className = 'vcard';
+    el.className = 'vrow';
     el.dataset.id = id;
     el.innerHTML =
-      `<span class="vtag">${String(i + 1).padStart(2, '0')} · ${NATIONS[v.nation].short}</span>` +
-      `<div class="vname">${v.name}</div>` +
-      `<div class="vfull">${v.full}</div>` +
-      `<div class="vmeta"><em>${ERA_LABEL[v.era] || '—'}</em><em class="rl">${ROLE_LABEL[v.role] || '—'}</em></div>` +
-      `<div class="vwpn">${v.weapon.name}</div>` +
-      `<div class="vdesc">${v.desc}</div>` +
-      `<div class="vstats">${vstat('机动', v.stat.spd)}${vstat('火力', v.stat.fire)}${vstat('防护', v.stat.armor)}</div>`;
+      `<span class="vic">${ROLE_CHAR[v.role] || '·'}</span>` +
+      `<span class="vtxt"><span class="vn">${v.name}</span>` +
+      `<span class="vr">${ERA_LABEL[v.era] || '—'} · ${ROLE_LABEL[v.role] || '—'}</span></span>`;
     el.addEventListener('click', () => selectVehicle(id));
     gridEl.appendChild(el);
     gcards.set(id, el);
@@ -6633,8 +6745,16 @@ function selectVehicle(id){
 
   for(const [cid, el] of gcards) el.classList.toggle('sel', cid === id);
 
-  gnameEl.textContent = V.name + ' · ' + V.full;
-  gdescEl.textContent = V.desc + '　·　' + V.weapon.name;
+  gnameEl.textContent = V.name;
+  if(gfullEl)  gfullEl.textContent = V.full;
+  if(gchipsEl) gchipsEl.innerHTML =
+    `<em>${ERA_LABEL[V.era] || '—'}</em>` +
+    `<em class="rl">${ROLE_LABEL[V.role] || '—'}</em>` +
+    `<em>${NATIONS[V.nation].name}</em>`;
+  if(gweapEl)  gweapEl.textContent = V.weapon.name;
+  if(gstatsEl) gstatsEl.innerHTML =
+    vstat('机动', V.stat.spd) + vstat('火力', V.stat.fire) + vstat('防护', V.stat.armor);
+  gdescEl.textContent = V.desc;
 
   return applyVehicle(id);
 }
@@ -6678,7 +6798,7 @@ function updateGarageLoad(){
     if(gloadEl) gloadEl.textContent = '程序化';
     return;
   }
-  const done = MODEL.total ? MODEL.loaded / MODEL.total : 1;
+  const done = MODEL.total ? Math.min(1, MODEL.loaded / MODEL.total) : 1;
   if(gbarEl)  gbarEl.style.width = (done * 100).toFixed(1) + '%';
   if(gloadEl) gloadEl.textContent = MODEL.total
     ? `贴图 ${(done * 100).toFixed(0)}%`
@@ -7186,6 +7306,8 @@ function netApplyUI(){
 
   /* 大厅只有点「联机测试」才出现 */
   if(lobby)  lobby.hidden  = !NET.lobby;
+  const gEl = netEl('garage');
+  if(gEl) gEl.classList.toggle('lobby', !!NET.lobby);
   if(form)   form.hidden   = NET.on;
   if(room)   room.hidden   = !NET.on;
 

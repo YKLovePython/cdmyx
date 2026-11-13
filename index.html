@@ -7,275 +7,413 @@
 <script async src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"
         onerror="var _s=document.createElement('script');_s.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';document.head.appendChild(_s)"></script>
 <style>
-  :root{color-scheme:dark}
-  html,body{height:100%;margin:0;background:#0a0908;overflow:hidden;user-select:none}
+  :root{
+    color-scheme:dark;
+    --font:"Bahnschrift","DIN Alternate","Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    --mono:"Cascadia Mono","Consolas",ui-monospace,monospace;
+    --tx:#dfe3e2; --dim:#8e979a; --dim2:#5f686b;
+    --gold:#c9a86b; --gold-hi:#f0dcae;
+    --line:rgba(255,255,255,.14); --line2:rgba(255,255,255,.07);
+    --red:#c9583f; --green:#8fbf7a;
+    --nc:#c9a86b;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:#08090a;overflow:hidden;user-select:none;
+    font-family:var(--font);color:var(--tx);-webkit-font-smoothing:antialiased}
   #c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:none}
 
-  /* ---- 瞄准圈：你要打的世界落点 ---- */
-  #aim{position:fixed;left:0;top:0;width:24px;height:24px;pointer-events:none;
-       will-change:transform;z-index:4;transition:opacity .12s}
-  #aim::before{content:"";position:absolute;inset:0;border:1px solid rgba(255,243,224,.9);
-       border-radius:50%;box-shadow:0 0 7px rgba(0,0,0,.55)}
-  #aim::after{content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px 0 0 -1.5px;
-       background:rgba(255,247,232,.95);border-radius:50%}
+  /* ===================== 战斗 HUD ===================== */
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:5;opacity:0;transition:opacity .3s;
+    text-shadow:0 1px 2px rgba(0,0,0,.55);
+    background:linear-gradient(180deg,rgba(4,6,7,.5) 0,rgba(4,6,7,0) 92px),
+               linear-gradient(0deg,rgba(4,6,7,.46) 0,rgba(4,6,7,0) 116px)}
+  body.playing #hud{opacity:1}
 
-  /* ---- 炮管圈：炮弹实际落点 ---- */
-  #gun{position:fixed;left:0;top:0;width:36px;height:36px;pointer-events:none;display:none;
-       will-change:transform;z-index:4}
-  #gun::before{content:"";position:absolute;inset:0;border:1.5px solid rgba(150,240,255,.85);
-       border-radius:50%;box-shadow:0 0 8px rgba(110,210,255,.5),inset 0 0 8px rgba(110,210,255,.16)}
-  #gun::after{content:"";position:absolute;left:50%;top:50%;width:5px;height:5px;margin:-2.5px 0 0 -2.5px;
-       background:rgba(200,250,255,.95);border-radius:50%;box-shadow:0 0 9px rgba(150,240,255,.9)}
-  #gun.lock::before{border-color:rgba(255,132,96,.95);
-       box-shadow:0 0 12px rgba(255,110,70,.65),inset 0 0 8px rgba(255,110,70,.2)}
-  #gun.lock::after{background:#ffb59c;box-shadow:0 0 10px rgba(255,130,90,.95)}
+  /* ---- 顶部罗盘 ---- */
+  #compass{position:absolute;left:50%;top:10px;transform:translateX(-50%);
+    width:min(460px,54vw);height:26px;overflow:hidden;
+    -webkit-mask-image:linear-gradient(90deg,transparent,#000 13%,#000 87%,transparent);
+            mask-image:linear-gradient(90deg,transparent,#000 13%,#000 87%,transparent)}
+  #compassTrack{position:absolute;left:0;top:0;height:100%;will-change:transform}
+  #compassTrack i{position:absolute;bottom:6px;width:1px;height:5px;background:rgba(255,255,255,.3)}
+  #compassTrack i.m{height:8px;background:rgba(255,255,255,.62)}
+  #compassTrack i b{position:absolute;bottom:11px;left:50%;transform:translateX(-50%);
+    font-style:normal;font-weight:600;font-size:9px;line-height:1;letter-spacing:.1em;
+    color:rgba(255,255,255,.86);white-space:nowrap}
+  #compassTrack i b.num{font-family:var(--mono);font-weight:400;font-size:8.5px;color:rgba(255,255,255,.42)}
+  #compassMark{position:absolute;left:50%;top:0;width:0;height:0;transform:translateX(-50%);
+    border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid var(--gold)}
 
+  /* ---- 击杀提示 ---- */
+  #feed{position:absolute;left:50%;top:44px;transform:translateX(-50%);text-align:center;
+    font-size:11.5px;letter-spacing:.03em;color:#eadfc7;pointer-events:none}
+  #feed>div{display:block;width:max-content;max-width:76vw;margin:2px auto 0;padding:2px 9px;
+    background:rgba(8,10,11,.42);border-left:1px solid var(--gold)}
+
+  /* ---- 小地图 ---- */
+  #mmwrap{position:absolute;right:12px;top:12px;width:150px;height:150px;
+    border:1px solid var(--line);background:rgba(10,12,13,.42);overflow:hidden}
+  #minimap{display:block;width:100%;height:100%}
+  #mmN{position:absolute;left:50%;top:3px;transform:translateX(-50%);
+    font-size:9px;font-weight:600;letter-spacing:.12em;color:rgba(255,255,255,.5)}
+  #mmScale{position:absolute;left:5px;bottom:3px;font-family:var(--mono);font-size:8.5px;
+    color:rgba(255,255,255,.34);letter-spacing:.04em}
+
+  /* ---- 左下：载具状态 ---- */
+  #vpanel{position:absolute;left:18px;bottom:16px;width:238px}
+  #vname{display:flex;align-items:baseline;gap:7px;margin-bottom:6px}
+  #vname b{font-size:16px;font-weight:600;letter-spacing:.06em;color:#f1f4f1}
+  #vname span{font-size:10px;letter-spacing:.06em;color:var(--dim)}
+  #hpline{display:flex;align-items:center;gap:7px;margin-bottom:7px}
+  #hpline[hidden]{display:none}
+  #hpbar{flex:1;height:4px;background:rgba(255,255,255,.11);overflow:hidden}
+  #hpbar i{display:block;height:100%;width:100%;background:var(--green);
+    transition:width .14s,background .2s}
+  #hpline.low #hpbar i{background:var(--red)}
+  #hpnum{font-family:var(--mono);font-size:12px;font-weight:600;color:#e8ece9}
+  #vrows{display:flex;gap:15px;align-items:baseline}
+  #vrows>div{display:flex;align-items:baseline;gap:5px}
+  #vrows span{font-size:9.5px;letter-spacing:.16em;color:rgba(223,227,226,.55)}
+  #vrows b{font-family:var(--mono);font-size:13px;font-weight:600;color:#e2e7e3}
+  #vrows u{text-decoration:none;font-size:9px;color:var(--dim2)}
+  #kbdhelp{display:block;margin-top:10px;font-size:10px;line-height:1.7;letter-spacing:.02em;
+    color:rgba(223,227,226,.3);max-width:252px}
+  #tload{display:block;margin-top:4px;font-size:10px;letter-spacing:.06em;color:rgba(201,168,107,.72)}
+
+  /* ---- 底部中间：弹药 ---- */
+  #ammobox{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);
+    display:flex;align-items:flex-end;gap:10px;pointer-events:none}
+  #ammo{font-size:31px;line-height:.86;font-weight:600;letter-spacing:.01em;color:#eff2ef;
+    font-variant-numeric:tabular-nums}
+  #ammobox.reloading #ammo{color:#e6b58a}
+  #ammometa{display:flex;flex-direction:column;gap:5px;padding-bottom:2px}
+  #ammometa span{font-size:9px;letter-spacing:.16em;color:rgba(223,227,226,.42);white-space:nowrap}
+  #reloadbar{display:block;width:78px;height:2px;background:rgba(255,255,255,.12);overflow:hidden}
+  #reloadbar u{display:block;height:100%;width:100%;background:var(--gold);transition:width .08s linear}
+
+  /* ---- 右下：速度 ---- */
+  #spdbox{position:absolute;right:18px;bottom:16px;text-align:right}
+  #spdbox>#spd{font-size:35px;line-height:.84;font-weight:600;letter-spacing:.01em;color:#eff2ef;
+    font-variant-numeric:tabular-nums}
+  #spdbox>span{font-size:9.5px;letter-spacing:.16em;color:rgba(223,227,226,.45);margin-left:5px}
+  #spdsub,#spdsub2{display:flex;justify-content:flex-end;gap:6px;margin-top:5px;
+    font-size:9.5px;letter-spacing:.1em}
+  #spdsub span,#spdsub2 span{color:var(--dim2)}
+  #spdsub b,#spdsub2 b{color:var(--gold);font-weight:600;letter-spacing:.03em}
+
+  /* ---- 瞄准 / 炮管圈 / 测距 ---- */
+  #aim{position:fixed;left:0;top:0;width:26px;height:26px;pointer-events:none;
+    will-change:transform;z-index:4;transition:opacity .12s}
+  #aim::before{content:"";position:absolute;inset:0;border:1px solid rgba(255,255,255,.8);
+    border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.3)}
+  #aim::after{content:"";position:absolute;left:50%;top:50%;width:2px;height:2px;margin:-1px 0 0 -1px;
+    background:#fff;border-radius:50%}
+  #gun{position:fixed;left:0;top:0;width:34px;height:34px;pointer-events:none;display:none;
+    will-change:transform;z-index:4}
+  #gun::before{content:"";position:absolute;inset:0;border:1px solid rgba(190,235,255,.7);
+    border-radius:50%;box-shadow:0 0 0 1px rgba(0,0,0,.28)}
+  #gun::after{content:"";position:absolute;left:50%;top:50%;width:3px;height:3px;margin:-1.5px 0 0 -1.5px;
+    background:rgba(220,248,255,.95);border-radius:50%}
+  #gun.lock::before{border-color:rgba(255,120,84,.9)}
+  #gun.lock::after{background:#ffb59c}
   #range{position:fixed;left:0;top:0;display:none;pointer-events:none;
-       font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.10em;
-       color:rgba(180,242,255,.92);text-shadow:0 0 6px rgba(0,0,0,.95);white-space:nowrap;z-index:4}
+    font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:rgba(210,242,255,.9);
+    background:rgba(6,9,11,.42);padding:1px 5px;white-space:nowrap;z-index:4}
 
-  /* ---- 命中标记 ---- */
-  #hitmark{position:fixed;left:50%;top:50%;width:30px;height:30px;pointer-events:none;opacity:0;
-       will-change:transform,opacity;z-index:5}
+  #hitmark{position:fixed;left:50%;top:50%;width:28px;height:28px;pointer-events:none;opacity:0;
+    will-change:transform,opacity;z-index:5}
   #hitmark::before,#hitmark::after{content:"";position:absolute;left:50%;top:50%;
-       width:30px;height:2px;margin:-1px 0 0 -15px;
-       background:linear-gradient(90deg,#ffd9a0 0 24%,transparent 24% 76%,#ffd9a0 76% 100%)}
+    width:28px;height:1.5px;margin:-.75px 0 0 -14px;
+    background:linear-gradient(90deg,#fff 0 22%,transparent 22% 78%,#fff 78% 100%)}
   #hitmark::before{transform:rotate(45deg)}
   #hitmark::after{transform:rotate(-45deg)}
 
-  /* ---- 击杀提示 ---- */
-  #feed{position:fixed;left:50%;top:76px;transform:translateX(-50%);text-align:center;pointer-events:none;
-       font:12px/1.95 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;
-       color:#ffcf8a;text-shadow:0 0 9px rgba(0,0,0,.95);z-index:5}
-
-  /* ---- 指针锁定提示 ---- */
-  #lockhint{position:fixed;left:50%;bottom:15%;transform:translateX(-50%);pointer-events:none;
-       font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.14em;
-       color:rgba(255,196,120,.92);text-shadow:0 0 9px rgba(0,0,0,.95);z-index:5;
-       transition:opacity .25s;white-space:nowrap}
-
-  /* ---- 左下角状态 ---- */
-  #hud{position:fixed;left:18px;bottom:16px;font:11px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;
-       letter-spacing:.09em;color:rgba(232,226,212,.5);text-transform:uppercase;pointer-events:none;
-       padding-left:11px;border-left:2px solid rgba(255,176,84,.75);z-index:5}
-  #hud b{color:#efe9dc;font-weight:600}
-  #hud i{color:#ffb054;font-style:normal}
-  #hud #hpline{color:rgba(232,226,212,.62)}
-  #hud #hpbar{display:inline-block;width:84px;height:5px;background:rgba(255,255,255,.12);
-       vertical-align:middle;margin:0 6px;overflow:hidden}
-  #hud #hpbar b{display:block;height:100%;width:100%;background:#8fe39a;transition:width .12s,background .2s}
-  #hud #hpline.low #hpbar b{background:#ff7a5c}
-
-  /* ---- 联机：受伤红框 / 阵亡提示 ---- */
+  /* ---- 受伤 / 阵亡 / 锁定提示 ---- */
   #dmg{position:fixed;inset:0;z-index:6;pointer-events:none;opacity:0;
-       background:radial-gradient(ellipse at center,rgba(120,0,0,0) 40%,rgba(200,28,12,.62) 100%);
-       transition:opacity .10s}
-  #deadmsg{position:fixed;left:50%;top:42%;transform:translate(-50%,-50%);z-index:8;
-       pointer-events:none;text-align:center;font:12px/1.8 ui-monospace,SFMono-Regular,Menlo,monospace;
-       letter-spacing:.22em;color:#ffcdbc;text-shadow:0 0 18px rgba(255,70,40,.7);display:none;white-space:nowrap}
-  #deadmsg b{display:block;font-size:20px;letter-spacing:.32em;color:#ff8f74;margin-bottom:4px}
+    background:radial-gradient(ellipse at center,rgba(120,0,0,0) 44%,rgba(168,28,12,.58) 100%);
+    transition:opacity .12s}
+  #deadmsg{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);z-index:8;
+    pointer-events:none;display:none;text-align:center;min-width:264px;
+    padding:12px 26px;background:rgba(13,8,7,.6);border:1px solid rgba(201,88,63,.5);
+    border-left:2px solid var(--red);font-size:11px;letter-spacing:.08em;color:#f1d9d0;
+    white-space:nowrap}
+  #deadmsg b{display:block;font-size:19px;font-weight:600;letter-spacing:.2em;color:#ff9f86;
+    margin-bottom:5px}
+  #lockhint{position:fixed;left:50%;bottom:12%;transform:translateX(-50%);pointer-events:none;
+    font-size:10.5px;letter-spacing:.1em;color:rgba(223,227,226,.55);z-index:5;
+    background:rgba(6,8,9,.4);padding:4px 10px;transition:opacity .25s;white-space:nowrap}
 
-  #bench{position:fixed;right:12px;top:12px;display:none;white-space:pre;font:11px/1.6 ui-monospace,monospace;
-         color:#cfe3ff;background:rgba(6,10,16,.72);padding:8px 10px;border:1px solid rgba(120,160,210,.35);
-         user-select:none;z-index:6}
-  #fatal{position:fixed;left:0;right:0;bottom:0;max-height:46%;overflow:auto;display:none;white-space:pre-wrap;
-         font:12px/1.45 ui-monospace,monospace;color:#ffb4a8;background:rgba(40,8,4,.92);padding:10px 14px;z-index:40}
+  #bench{position:fixed;right:12px;top:158px;display:none;white-space:pre;
+    font-family:var(--mono);font-size:11px;line-height:1.6;color:#cfe3ff;
+    background:rgba(6,10,16,.72);padding:8px 10px;border:1px solid rgba(120,160,210,.3);z-index:6}
+  #fatal{position:fixed;left:0;right:0;bottom:0;max-height:46%;overflow:auto;display:none;
+    white-space:pre-wrap;font-family:var(--mono);font-size:12px;line-height:1.45;color:#ffb4a8;
+    background:rgba(40,8,4,.92);padding:10px 14px;z-index:40}
 
-  /* ================= 启动载入画面 ================= */
-  /*  放在车库之前，脚本再大也是先看到这里，不会黑屏。
-      未执行 JS 时是来回扫的 indeterminate 条，执行后切成真实百分比。   */
-  #boot{position:fixed;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;
-        background:#070605;transition:opacity .38s}
+  /* ===================== 启动载入画面 ===================== */
+  #boot{position:fixed;inset:0;z-index:30;background:#08090a;transition:opacity .4s}
   #boot.hide{opacity:0;pointer-events:none}
-  #bootBox{width:min(440px,78vw);font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
-           letter-spacing:.14em;color:#e7e0d2;text-align:center}
-  #bootTitle{font-size:17px;letter-spacing:.30em;color:#ffb054}
-  #bootTitle b{font-weight:600;color:#ffb054}
-  #bootTitle span{font-size:10px;letter-spacing:.20em;color:rgba(231,224,210,.42)}
-  #bootSub{margin-top:9px;font-size:10.5px;color:rgba(231,224,210,.5);min-height:1.7em}
-  #bootTrack{position:relative;margin-top:13px;height:3px;background:rgba(255,255,255,.10);overflow:hidden}
-  #bootFill{position:absolute;left:0;top:0;bottom:0;width:0%;background:linear-gradient(90deg,#ffb054,#ffe0a8);
-            transition:width .18s}
-  #bootScan{position:absolute;left:0;top:0;bottom:0;width:32%;
-            background:linear-gradient(90deg,transparent,rgba(255,176,84,.6),transparent);
-            animation:bootscan 1.15s linear infinite}
-  @keyframes bootscan{from{transform:translateX(-110%)}to{transform:translateX(330%)}}
-  #bootPct{margin-top:8px;font-size:10px;color:rgba(255,176,84,.8);letter-spacing:.18em}
+  #bootBrand{position:absolute;left:28px;bottom:56px;display:flex;align-items:baseline;gap:10px}
+  #bootBrand b{font-size:19px;font-weight:600;letter-spacing:.18em;color:#f1f4f1}
+  #bootBrand span{font-size:10px;letter-spacing:.16em;color:var(--dim2)}
+  #bootBox{position:absolute;left:28px;right:28px;bottom:30px}
+  #bootSub{font-size:10.5px;letter-spacing:.06em;color:var(--dim2);margin-bottom:8px}
+  #bootTrack{position:relative;height:2px;background:rgba(255,255,255,.09);overflow:hidden}
+  #bootFill{position:absolute;left:0;top:0;bottom:0;width:0%;background:var(--gold);
+    transition:width .18s}
+  #bootScan{position:absolute;left:0;top:0;bottom:0;width:30%;
+    background:linear-gradient(90deg,transparent,rgba(201,168,107,.55),transparent);
+    animation:bootscan 1.2s linear infinite}
+  @keyframes bootscan{from{transform:translateX(-120%)}to{transform:translateX(360%)}}
+  #bootPct{position:absolute;right:28px;bottom:48px;font-family:var(--mono);font-size:30px;
+    font-weight:600;letter-spacing:.02em;color:var(--gold);font-variant-numeric:tabular-nums}
 
-  /* ================= 车库 / 选车界面 ================= */
-  #garage{position:fixed;inset:0;z-index:20;display:flex;align-items:center;
-          --nc:#ffb054;
-          background:
-            linear-gradient(90deg,rgba(5,4,3,.96) 0%,rgba(5,4,3,.93) 30%,rgba(5,4,3,.60) 50%,rgba(5,4,3,0) 74%),
-            repeating-linear-gradient(0deg, rgba(255,255,255,.02) 0 1px, transparent 1px 3px);
-          font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
-          color:#e7e0d2;transition:opacity .32s;cursor:default}
+  /* ===================== 车库 ===================== */
+  #garage{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;
+    background:
+      linear-gradient(90deg,rgba(7,8,9,.95) 0%,rgba(7,8,9,.89) 24%,rgba(7,8,9,.34) 46%,rgba(7,8,9,0) 62%),
+      linear-gradient(180deg,rgba(7,8,9,.7) 0%,rgba(7,8,9,0) 20%,rgba(7,8,9,0) 64%,rgba(7,8,9,.8) 100%);
+    color:var(--tx);transition:opacity .3s;cursor:default}
   #garage.hide{opacity:0;pointer-events:none}
-  #gwrap{width:min(600px,46vw);margin-left:max(22px,4vw);max-height:92vh;
-         display:flex;flex-direction:column;gap:13px;overflow:auto}
-  #ghead{padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,.12)}
-  #gkicker{font-size:10px;letter-spacing:.30em;color:var(--nc);text-transform:uppercase}
-  #ghead h1{margin:4px 0 0;font-size:clamp(20px,2.2vw,28px);letter-spacing:.14em;font-weight:600;color:#f4ecdc}
-  #gsub{margin-top:6px;font-size:10.5px;letter-spacing:.10em;color:rgba(231,224,210,.5)}
 
-  /* ---- 国家阵营 Tab ---- */
-  #gnations{display:flex;gap:6px;margin-top:11px;flex-wrap:wrap}
-  .gnat{position:relative;display:flex;align-items:baseline;gap:6px;padding:6px 11px 5px;
-        background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.10);
-        border-bottom:2px solid transparent;color:rgba(231,224,210,.52);
-        font:inherit;font-size:10.5px;letter-spacing:.14em;cursor:pointer;
-        transition:background .15s,color .15s,border-color .15s}
-  .gnat b{font-size:11px;letter-spacing:.18em;color:rgba(231,224,210,.70);font-weight:600}
-  .gnat span{font-size:10px}
-  .gnat i{font-style:normal;font-size:9px;color:rgba(231,224,210,.32)}
-  .gnat:hover{background:rgba(255,255,255,.07);color:#e7e0d2}
-  .gnat.sel{background:rgba(255,255,255,.08);border-bottom-color:var(--nc);color:#f4ecdc}
-  .gnat.sel b{color:var(--nc)}
+  #gtop{flex:none;display:flex;align-items:center;justify-content:space-between;
+    height:42px;padding:0 20px;border-bottom:1px solid var(--line2);
+    background:rgba(8,9,10,.5)}
+  .gt-b{display:flex;align-items:baseline;gap:9px}
+  .gt-b b{font-size:14px;font-weight:600;letter-spacing:.18em;color:#f1f4f1}
+  .gt-b span{font-size:10px;letter-spacing:.12em;color:var(--dim2)}
+  .gt-r{display:flex;gap:18px;font-size:10px;letter-spacing:.1em;color:var(--dim2)}
 
-  #grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
-  @media (max-width:1000px){
-    #garage{background:rgba(5,4,3,.94);justify-content:center}
-    #gwrap{width:auto;margin:0 16px;max-width:860px}
-    #grid{grid-template-columns:repeat(3,1fr)}
-  }
-  @media (max-width:640px){#grid{grid-template-columns:repeat(2,1fr)}}
-  .vcard{position:relative;text-align:left;padding:12px 13px 11px;border:1px solid rgba(255,255,255,.10);
-         background:linear-gradient(160deg,rgba(26,24,21,.94),rgba(13,12,11,.94));
-         color:inherit;font:inherit;cursor:pointer;transition:border-color .15s,transform .12s,background .15s;
-         clip-path:polygon(0 0,100% 0,100% calc(100% - 11px),calc(100% - 11px) 100%,0 100%)}
-  .vcard:hover{border-color:var(--nc);transform:translateY(-2px)}
-  .vcard.sel{border-color:var(--nc);background:linear-gradient(160deg,rgba(52,44,32,.96),rgba(18,16,13,.96));
-             box-shadow:inset 0 0 0 1px var(--nc),0 0 24px rgba(0,0,0,.45)}
-  .vcard .vtag{position:absolute;right:10px;top:9px;font-size:9px;letter-spacing:.18em;
-               color:var(--nc);opacity:.8;text-transform:uppercase}
-  .vcard .vname{font-size:17px;letter-spacing:.10em;font-weight:600;color:#f6efe1}
-  .vcard .vfull{font-size:10px;letter-spacing:.10em;color:rgba(231,224,210,.45);margin-top:1px}
-  .vcard .vmeta{display:flex;gap:5px;margin-top:5px}
-  .vcard .vmeta em{font-style:normal;font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;
-                   padding:1px 5px;border:1px solid rgba(255,255,255,.14);color:rgba(231,224,210,.48)}
-  .vcard .vmeta em.rl{color:var(--nc);border-color:currentColor;opacity:.85}
-  .vcard .vwpn{font-size:11px;letter-spacing:.05em;color:var(--nc);margin-top:6px}
-  .vcard .vdesc{font-size:10.5px;line-height:1.5;color:rgba(231,224,210,.55);margin-top:4px;min-height:2.6em}
-  .vcard .vstats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px}
-  .vstat{font-size:9px;letter-spacing:.10em;color:rgba(231,224,210,.42);text-transform:uppercase}
-  .vstat i{display:block;height:3px;margin-top:3px;background:rgba(255,255,255,.10);position:relative;overflow:hidden}
-  .vstat i b{position:absolute;left:0;top:0;bottom:0;background:var(--nc);border-radius:2px}
-  #gfoot{display:flex;align-items:center;gap:14px;padding-top:4px;flex-wrap:wrap}
-  #ginfo{flex:1 1 100%;min-width:0}
-  #gname{display:block;font-size:14px;letter-spacing:.12em;color:#f4ecdc}
-  #gdesc{display:block;font-size:11px;letter-spacing:.06em;color:rgba(231,224,210,.5);margin-top:2px}
-  #gbar{width:150px;height:2px;background:rgba(255,255,255,.10);overflow:hidden;flex:none}
-  #gbar i{display:block;height:100%;width:0%;background:var(--nc);transition:width .2s}
-  #gload{flex:none;min-width:72px;text-align:right;font-size:10px;letter-spacing:.10em;color:var(--nc);opacity:.8}
-  #go,#netEnter{margin-left:auto;flex:none;padding:11px 22px;font:inherit;font-size:12px;letter-spacing:.18em;
-      text-transform:uppercase;color:#1a1206;background:linear-gradient(180deg,#ffc067,#f09b32);border:0;cursor:pointer;
-      clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
-      transition:filter .15s,transform .12s}
-  #go:hover,#netEnter:hover{filter:brightness(1.1);transform:translateY(-1px)}
-  #go:active,#netEnter:active{transform:translateY(0)}
-  #go:disabled{opacity:.4;cursor:default;filter:none;transform:none}
-  #goNet{flex:none;padding:10px 16px;font:inherit;font-size:11.5px;letter-spacing:.18em;text-transform:uppercase;
-      color:#ffcf8a;background:rgba(255,176,84,.08);border:1px solid rgba(255,176,84,.5);cursor:pointer;
-      clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);
-      transition:background .15s,color .15s,border-color .15s}
-  #goNet:hover{background:rgba(255,176,84,.20);color:#ffe6c2}
-  #goNet.on{background:rgba(255,176,84,.24);border-color:var(--nc);color:#ffe6c2}
+  #gmain{flex:1;display:flex;align-items:stretch;min-height:0}
 
-  /* ================= 联机大厅（车库底部展开） ================= */
-  #netlobby{display:flex;flex-direction:column;gap:8px;padding:10px 0 2px;
-            border-top:1px solid rgba(255,255,255,.08)}
+  #gleft{flex:none;width:min(372px,44vw);display:flex;flex-direction:column;
+    min-height:0;padding:18px 0 0 20px;
+    background:linear-gradient(90deg,rgba(6,7,8,.88) 0%,rgba(6,7,8,.8) 74%,rgba(6,7,8,0) 100%)}
+  #ghead{flex:none;display:flex;align-items:baseline;justify-content:space-between;
+    padding-right:16px}
+  #ghead h1{margin:0;font-size:17px;font-weight:600;letter-spacing:.16em;color:#eef1ee}
+  #gkicker{font-size:9.5px;letter-spacing:.13em;color:var(--dim2)}
+
+  #gnations{flex:none;display:flex;margin:12px 16px 10px 0;border-bottom:1px solid var(--line2)}
+  .gnat{position:relative;flex:1;padding:7px 0 8px;background:none;border:0;cursor:pointer;
+    font-family:inherit;font-size:9.5px;letter-spacing:.08em;color:var(--dim2);text-align:center;
+    transition:color .12s}
+  .gnat b{display:block;font-size:11px;font-weight:600;letter-spacing:.16em;
+    color:rgba(223,227,226,.52);transition:color .12s}
+  .gnat i{font-style:normal;font-size:8px;color:var(--dim2);margin-left:3px}
+  .gnat:hover,.gnat:hover b{color:var(--tx)}
+  .gnat.sel,.gnat.sel b{color:#eef1ee}
+  .gnat.sel::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;
+    background:var(--nc)}
+
+  #grid{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:8px;
+    display:flex;flex-direction:column;gap:1px;
+    scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+  #grid::-webkit-scrollbar{width:6px}
+  #grid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16)}
+  .vrow{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px 8px 9px;
+    background:none;border:0;border-left:2px solid transparent;cursor:pointer;text-align:left;
+    color:inherit;font-family:inherit;transition:background .12s,border-color .12s}
+  .vrow:hover{background:rgba(255,255,255,.045)}
+  .vrow.sel{background:linear-gradient(90deg,rgba(201,168,107,.14),rgba(201,168,107,0) 72%);
+    border-left-color:var(--gold)}
+  .vic{flex:none;width:22px;height:22px;display:flex;align-items:center;justify-content:center;
+    border:1px solid rgba(255,255,255,.16);font-size:10px;letter-spacing:0;color:var(--dim)}
+  .vrow.sel .vic{border-color:rgba(201,168,107,.5);color:var(--gold-hi)}
+  .vtxt{flex:1;min-width:0}
+  .vn{display:block;font-size:13.5px;letter-spacing:.03em;color:#e7eae7;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .vr{display:block;font-size:9.5px;letter-spacing:.06em;color:var(--dim2);margin-top:1px}
+
+  #gloadrow{flex:none;display:flex;align-items:center;gap:9px;padding:10px 16px 12px 0}
+  #gbar{flex:1;height:2px;background:rgba(255,255,255,.09);overflow:hidden}
+  #gbar i{display:block;height:100%;width:0;background:var(--gold);transition:width .2s}
+  #gload{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--dim2);
+    white-space:nowrap}
+
+  #gside{flex:none;width:min(334px,35vw);margin-left:auto;display:flex;flex-direction:column;
+    justify-content:flex-end;gap:12px;padding:0 20px 18px 0}
+  #glegend{margin-top:11px;padding-top:9px;border-top:1px solid var(--line2);
+    font-size:8.5px;line-height:1.85;letter-spacing:.03em;color:rgba(223,227,226,.36)}
+  #ginfo{background:linear-gradient(180deg,rgba(12,14,15,.66),rgba(12,14,15,.9));
+    border:1px solid var(--line2);border-top-color:var(--line);padding:14px 15px 13px}
+  .gi-lab{font-size:9px;letter-spacing:.2em;color:var(--dim2);margin-bottom:5px}
+  #gname{font-size:24px;font-weight:600;letter-spacing:.03em;line-height:1.1;color:#f3f6f3}
+  #gfull{font-size:10.5px;letter-spacing:.05em;color:var(--dim);margin-top:3px}
+  #gchips{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+  #gchips em{font-style:normal;font-size:9px;letter-spacing:.1em;padding:2px 6px;
+    border:1px solid rgba(255,255,255,.14);color:rgba(223,227,226,.58)}
+  #gchips em.rl{color:var(--gold);border-color:rgba(201,168,107,.42)}
+  #gweap{margin-top:8px;font-size:10px;letter-spacing:.06em;color:rgba(201,168,107,.9)}
+  #gstats{display:flex;flex-direction:column;gap:7px;margin-top:12px;padding-top:11px;
+    border-top:1px solid var(--line2)}
+  .gst{display:flex;align-items:center;gap:8px;font-size:9.5px;letter-spacing:.12em;
+    color:var(--dim2)}
+  .gst span{flex:none;width:30px}
+  .gst i{flex:1;height:3px;background:rgba(255,255,255,.1);overflow:hidden}
+  .gst i u{display:block;height:100%;background:rgba(223,227,226,.52)}
+  .gst b{flex:none;width:28px;text-align:right;font-family:var(--mono);font-size:10.5px;
+    font-weight:600;color:rgba(223,227,226,.8)}
+  #gdesc{margin-top:11px;font-size:10.5px;line-height:1.65;color:rgba(223,227,226,.48)}
+
+  #gfoot{display:flex;gap:8px;align-items:stretch}
+  #go,#netEnter{flex:1;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:2px;padding:9px 14px;border:0;cursor:pointer;
+    font-family:inherit;color:#191510;
+    background:linear-gradient(180deg,#efd9a8,#c9a86b);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.45);
+    transition:filter .12s,transform .1s}
+  #go span,#netEnter span{font-size:14px;font-weight:600;letter-spacing:.16em}
+  #go em,#netEnter em{font-style:normal;font-size:8.5px;letter-spacing:.16em;
+    color:rgba(25,21,16,.6)}
+  #go:hover,#netEnter:hover{filter:brightness(1.07)}
+  #go:active,#netEnter:active{transform:translateY(1px)}
+  #go:disabled{opacity:.34;cursor:default;filter:none;transform:none}
+  #go[hidden]{display:none}
+  #netEnter[hidden]{display:none}
+  #goNet{flex:none;width:104px;background:rgba(255,255,255,.03);border:1px solid var(--line);
+    color:rgba(223,227,226,.72);font-family:inherit;font-size:11px;letter-spacing:.16em;
+    cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+  #goNet:hover{background:rgba(201,168,107,.12);border-color:rgba(201,168,107,.55);
+    color:var(--gold-hi)}
+  #goNet.on{border-color:var(--gold);color:var(--gold-hi)}
+  #goNet[hidden]{display:none}
+
+  /* ===================== 联机大厅 ===================== */
+  #netlobby{position:fixed;left:18px;bottom:18px;z-index:2;
+    width:min(548px,calc(100vw - 420px));display:flex;flex-direction:column;gap:9px;
+    padding:12px 14px 13px;background:rgba(10,12,13,.94);
+    border:1px solid var(--line);border-top:2px solid var(--gold)}
   #netlobby[hidden]{display:none}
+  #garage.lobby #gloadrow{opacity:0}
   #netForm{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
   #netForm[hidden]{display:none}
-  #netlobby .nlabel{font-size:9.5px;letter-spacing:.28em;color:rgba(231,224,210,.42);text-transform:uppercase}
-  #netlobby input{background:rgba(0,0,0,.42);border:1px solid rgba(255,255,255,.13);color:#e7e0d2;
-                  font:inherit;font-size:11px;letter-spacing:.08em;padding:5px 8px;width:92px;outline:none}
-  #netlobby input:focus{border-color:var(--nc)}
-  #netlobby input:disabled{opacity:.45}
-  #netlobby button{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:#e7e0d2;
-                   font:inherit;font-size:10.5px;letter-spacing:.14em;padding:5px 10px;cursor:pointer;
-                   transition:background .15s,border-color .15s,color .15s}
-  #netlobby button:hover:enabled{background:rgba(255,176,84,.16);border-color:var(--nc);color:#ffe6c2}
-  #netlobby button:disabled{opacity:.38;cursor:default}
-  #netlobby .nlsep{width:1px;height:18px;background:rgba(255,255,255,.12);margin:0 3px}
-  #netlobby .nlhint{font-size:9.5px;letter-spacing:.06em;color:rgba(231,224,210,.34)}
-  #netRoom{display:flex;flex-direction:column;gap:7px}
+  #netlobby .nlabel{font-size:8.5px;letter-spacing:.24em;color:var(--dim2)}
+  #netlobby input{background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.13);
+    color:#e6e9e6;font-family:inherit;font-size:11px;letter-spacing:.06em;
+    padding:5px 8px;width:92px;outline:none}
+  #netlobby input:focus{border-color:rgba(201,168,107,.7)}
+  #netlobby input:disabled{opacity:.4}
+  #netlobby button{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.13);
+    color:#e6e9e6;font-family:inherit;font-size:10.5px;letter-spacing:.12em;padding:5px 11px;
+    cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+  #netlobby button:hover:enabled{background:rgba(201,168,107,.14);
+    border-color:rgba(201,168,107,.55);color:var(--gold-hi)}
+  #netlobby button:disabled{opacity:.36;cursor:default}
+  #netlobby .nlsep{width:1px;height:17px;background:rgba(255,255,255,.11);margin:0 3px}
+  #netlobby .nlhint{font-size:9px;letter-spacing:.05em;color:rgba(223,227,226,.3)}
+  #netRoom{display:flex;flex-direction:column;gap:8px}
   #netRoom[hidden]{display:none}
-  .nroomline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:10.5px;
-             letter-spacing:.10em;color:rgba(231,224,210,.6)}
-  #netlobby code{font:inherit;letter-spacing:.24em;color:#ffd9a0;font-size:12px}
-  #netRole{font-size:9.5px;letter-spacing:.14em;color:var(--nc);text-transform:uppercase}
-  #netlobby .nmini{background:none;border:1px solid rgba(255,176,84,.45);color:#ffc98a;font:inherit;
-                   font-size:9.5px;letter-spacing:.10em;padding:3px 7px;cursor:pointer}
-  #netlobby .nmini:hover{background:rgba(255,176,84,.15)}
-  #netStatus{font-size:10px;letter-spacing:.08em;color:rgba(231,224,210,.5)}
-  #netHint{font-size:9.5px;letter-spacing:.06em;color:rgba(231,224,210,.32)}
+  .nroomline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    font-size:10.5px;letter-spacing:.08em;color:rgba(223,227,226,.6)}
+  #netlobby code{font-family:var(--mono);font-size:13px;letter-spacing:.26em;color:#f2e3c6}
+  #netRole{font-size:9px;letter-spacing:.12em;color:var(--gold);text-transform:uppercase}
+  #netlobby .nmini{background:none;border:1px solid rgba(201,168,107,.42);color:#e8cfa1;
+    font-family:inherit;font-size:9px;letter-spacing:.08em;padding:3px 7px;cursor:pointer}
+  #netlobby .nmini:hover{background:rgba(201,168,107,.14)}
+  #netStatus{font-size:10px;letter-spacing:.06em;color:rgba(223,227,226,.46)}
+  #netHint{font-size:9px;letter-spacing:.04em;line-height:1.6;color:rgba(223,227,226,.26)}
   #netHint[hidden]{display:none}
-  #roster{display:flex;flex-wrap:wrap;gap:6px;margin:1px 0}
+  #roster{display:flex;flex-wrap:wrap;gap:5px;margin:1px 0}
   #roster[hidden]{display:none}
   #roster .np{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;
-              border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);
-              font-size:10.5px;letter-spacing:.08em;color:rgba(231,224,210,.7)}
-  #roster .np i{font-style:normal;font-size:9px;color:#0d0b09;background:var(--sc,#ffb054);
-                padding:0 4px;border-radius:2px;font-weight:700}
-  #roster .np u{text-decoration:none;font-style:normal;font-size:9.5px;color:#9fe0a6;margin-left:2px}
-  #roster .np em{font-style:normal;font-size:9.5px;color:rgba(231,224,210,.42)}
+    border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);
+    font-size:10.5px;letter-spacing:.05em;color:rgba(223,227,226,.72)}
+  #roster .np i{font-style:normal;font-size:8px;font-weight:700;color:#0d0b09;
+    background:var(--sc,#c9a86b);padding:0 3px}
+  #roster .np u{text-decoration:none;font-style:normal;font-size:9px;color:#9fd39f;margin-left:2px}
+  #roster .np em{font-style:normal;font-size:9px;color:rgba(223,227,226,.4)}
   #roster .np.dead{opacity:.42}
   #roster .np.dead u{color:#ff8d74}
-  #roster .np.me{border-color:var(--sc,#ffb054)}
+  #roster .np.me{border-color:rgba(255,255,255,.3)}
 
-  /* 游戏中右上角的房间信息 */
-  #netgame{position:fixed;right:14px;top:12px;z-index:6;pointer-events:none;
-           font:10.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.10em;
-           color:rgba(232,226,212,.72);background:rgba(6,7,9,.52);border:1px solid rgba(255,255,255,.10);
-           padding:7px 10px;min-width:132px}
+  /* ---- 战斗中右上房间信息 ---- */
+  #netgame{position:fixed;right:12px;top:158px;z-index:6;pointer-events:none;width:136px;
+    padding:6px 8px;background:rgba(10,12,13,.5);border:1px solid var(--line2);
+    font-size:10px;letter-spacing:.04em;color:rgba(223,227,226,.72)}
   #netgame[hidden]{display:none}
-  #netgame b{display:block;color:#ffcf8a;font-weight:600;font-size:10px;letter-spacing:.18em;margin-bottom:3px}
-  #netgame .ngrow i{font-style:normal;font-size:9px;color:#0d0b09;background:var(--sc,#ffb054);
-                    padding:0 3px;margin-right:5px;border-radius:2px;font-weight:700}
-  #netgame .ngrow em{font-style:normal;color:rgba(232,226,212,.38);margin-left:5px;font-size:9px}
-  #netgame .ngrow s{text-decoration:none;color:rgba(232,226,212,.5);font-size:9px;margin-left:5px}
-  #netgame .ngrow.dead{opacity:.42}
-  #netgame .ngrow.me{color:#ffe6c2}
+  #netgame b{display:block;margin-bottom:4px;font-size:9px;font-weight:600;letter-spacing:.16em;
+    color:var(--gold)}
+  .ngrow{display:flex;align-items:center;gap:5px;padding:1.5px 0;font-size:10px}
+  .ngrow i{font-style:normal;font-size:8px;font-weight:700;color:#0d0b09;
+    background:var(--sc,#c9a86b);padding:0 3px}
+  .ngrow em{font-style:normal;font-size:8.5px;color:rgba(223,227,226,.36);margin-left:auto}
+  .ngrow s{text-decoration:none;font-size:8.5px;color:rgba(223,227,226,.45)}
+  .ngrow.dead{opacity:.4}
+  .ngrow.me{color:#f2e6ce}
 
-  /* ---- 触屏操控（只在游戏进行中显示；桌面端不创建 DOM） ---- */
+  /* ===================== 触屏 ===================== */
   body.touch{overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
-  body.touch #hud{top:14px;bottom:auto;left:12px;font-size:9.5px;line-height:1.55;
-                  padding-left:9px;z-index:8}
   #touch{display:none}
   body.playing.touch #touch{display:block}
-  #tstick{position:fixed;left:24px;bottom:26px;width:136px;height:136px;border-radius:50%;
-          background:radial-gradient(circle at 50% 50%,rgba(255,255,255,.05),rgba(0,0,0,.30) 72%);
-          border:1px solid rgba(255,255,255,.16);touch-action:none;z-index:8}
-  #tstick::before{content:"";position:absolute;inset:41px;border-radius:50%;
-          border:1px solid rgba(255,255,255,.10)}
-  #tknob{position:absolute;left:50%;top:50%;width:58px;height:58px;margin:-29px 0 0 -29px;
-         border-radius:50%;background:rgba(255,176,84,.20);border:1.5px solid rgba(255,196,120,.66);
-         box-shadow:0 0 14px rgba(255,150,60,.25);will-change:transform}
-  .tbtn{position:fixed;display:flex;align-items:center;justify-content:center;border-radius:50%;
-        font:600 11px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;
-        color:rgba(255,240,220,.90);background:rgba(10,11,13,.34);
-        border:1px solid rgba(255,255,255,.20);touch-action:none;z-index:8;text-align:center}
-  .tbtn.on{background:rgba(255,176,84,.26);border-color:rgba(255,196,120,.85);color:#fff2dd}
-  #tfire{right:24px;bottom:26px;width:96px;height:96px;font-size:13px;
-         border-color:rgba(255,140,90,.5);background:rgba(120,30,10,.32)}
-  #tfire.on{background:rgba(255,110,60,.44);border-color:rgba(255,160,110,.95)}
-  #taim{right:38px;bottom:140px;width:66px;height:66px}
-  #tfree{right:132px;bottom:30px;width:58px;height:58px;font-size:10px}
-  #tcrF{right:132px;bottom:100px;width:58px;height:58px;font-size:10px}
-  #tcrR{right:132px;bottom:170px;width:58px;height:58px;font-size:10px}
-  #tchint{position:fixed;left:50%;bottom:246px;transform:translateX(-50%);pointer-events:none;
-          font:10px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.10em;
-          color:rgba(255,220,180,.78);text-shadow:0 0 8px rgba(0,0,0,.9);z-index:8;
-          transition:opacity .6s;white-space:nowrap}
-  #trot{display:none;position:fixed;left:50%;top:44%;transform:translate(-50%,-50%);
-        padding:11px 16px;background:rgba(8,9,11,.9);border:1px solid rgba(255,176,84,.55);
-        color:#ffd9a0;font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
-        letter-spacing:.12em;z-index:9;pointer-events:auto;cursor:pointer;white-space:nowrap;
-        -webkit-tap-highlight-color:transparent}
-  #trot:active{background:rgba(255,176,84,.26);color:#fff2dd;border-color:rgba(255,196,120,.9)}
+
+  body.touch #compass{width:min(240px,42vw);top:4px;height:28px}
+  body.touch #compassTrack i b{font-size:8px}
+  body.touch #mmwrap{width:88px;height:88px;top:6px;right:6px}
+  body.touch #mmScale{font-size:8px}
+  body.touch #vpanel{left:8px;top:32px;bottom:auto;width:150px}
+  body.touch #vname b{font-size:12.5px}
+  body.touch #vname span{font-size:8.5px}
+  body.touch #vrows{gap:8px}
+  body.touch #vrows span{font-size:8px;letter-spacing:.1em}
+  body.touch #vrows b{font-size:11px}
+  body.touch #kbdhelp,body.touch #tload{display:none}
+  body.touch #ammobox{left:50%;bottom:12px}
+  body.touch #ammo{font-size:22px}
+  body.touch #ammometa span{font-size:8px}
+  body.touch #reloadbar{width:56px}
+  body.touch #spdbox{left:8px;right:auto;top:96px;bottom:auto;text-align:left}
+  body.touch #spdbox>#spd{font-size:24px}
+  body.touch #spdsub,body.touch #spdsub2{justify-content:flex-start;margin-top:3px}
+  body.touch #feed{top:32px;font-size:10px}
+  body.touch #netgame{top:98px;right:6px;width:96px}
+  body.touch #netgame .ngrow em{display:none}
+
+  #tstick{position:fixed;left:20px;bottom:20px;width:132px;height:132px;border-radius:50%;
+    background:radial-gradient(circle at 50% 50%,rgba(255,255,255,.045),rgba(0,0,0,.3) 72%);
+    border:1px solid rgba(255,255,255,.17);touch-action:none;z-index:8}
+  #tstick::before{content:"";position:absolute;inset:40px;border-radius:50%;
+    border:1px solid rgba(255,255,255,.08)}
+  #tknob{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;
+    border-radius:50%;background:rgba(240,220,174,.13);border:1px solid rgba(240,220,174,.5);
+    will-change:transform}
+  .tbtn{position:fixed;display:flex;align-items:center;justify-content:center;
+    border-radius:10px;font-family:var(--font);font-weight:600;font-size:10.5px;
+    letter-spacing:.06em;color:rgba(240,244,240,.9);background:rgba(9,11,13,.4);
+    border:1px solid rgba(255,255,255,.2);touch-action:none;z-index:8;text-align:center}
+  .tbtn.on{background:rgba(201,168,107,.26);border-color:rgba(240,220,174,.85);color:#fff6e6}
+  #tfire{right:20px;bottom:20px;width:94px;height:94px;border-radius:50%;font-size:12.5px;
+    border-color:rgba(207,120,92,.45);background:rgba(120,34,16,.28)}
+  #tfire.on{background:rgba(207,96,64,.42);border-color:rgba(255,158,124,.9)}
+  #taim{right:34px;bottom:128px;width:62px;height:62px}
+  #tfree{right:126px;bottom:24px;width:56px;height:44px;font-size:10px}
+  #tcrF{right:126px;bottom:76px;width:56px;height:44px;font-size:10px}
+  #tcrR{right:126px;bottom:128px;width:56px;height:44px;font-size:10px}
+  #tchint{position:fixed;left:50%;bottom:196px;transform:translateX(-50%);pointer-events:none;
+    font-size:9.5px;letter-spacing:.08em;color:rgba(240,232,214,.66);z-index:8;
+    transition:opacity .6s;white-space:nowrap}
+  #trot{display:none;position:fixed;left:50%;top:42%;transform:translate(-50%,-50%);
+    padding:10px 16px;background:rgba(9,11,13,.9);border:1px solid rgba(201,168,107,.5);
+    color:#f2e3c6;font-size:11px;letter-spacing:.1em;z-index:9;pointer-events:auto;
+    cursor:pointer;white-space:nowrap;-webkit-tap-highlight-color:transparent}
+  #trot:active{background:rgba(201,168,107,.22);border-color:rgba(240,220,174,.85)}
   @media (orientation:portrait){ body.playing.touch #trot{display:block} }
   html.rot90 #trot,html.rot270 #trot{display:none!important}
+
+  #tflip{display:none;position:fixed;left:50%;bottom:8px;transform:translateX(-50%);
+    padding:5px 11px;background:rgba(9,11,13,.5);border:1px solid rgba(255,255,255,.14);
+    color:rgba(240,232,214,.66);font-size:9px;letter-spacing:.12em;z-index:9;
+    pointer-events:auto;-webkit-tap-highlight-color:transparent}
+  html.rot90 body.playing.touch #tflip,
+  html.rot270 body.playing.touch #tflip{display:block}
+  #tflip:active{background:rgba(201,168,107,.22);color:#fff6e6}
+
+  #tmute{display:none;position:fixed;left:20px;bottom:170px;padding:5px 9px;
+    background:rgba(9,11,13,.42);border:1px solid rgba(255,255,255,.14);
+    color:rgba(240,232,214,.6);font-size:9px;line-height:1.3;letter-spacing:.1em;
+    z-index:9;pointer-events:auto;-webkit-tap-highlight-color:transparent;white-space:nowrap}
+  body.playing.touch #tmute{display:block;left:8px;top:6px;bottom:auto}
+  #tmute:active{background:rgba(201,168,107,.22);color:#fff6e6}
 
   /* ---- 横屏兜底：浏览器不支持 screen.orientation.lock 时整页转 90° ---- */
   html.rot90 body{position:fixed;left:0;top:0;
@@ -288,31 +426,53 @@
         width:100dvh;height:100dvw;
         transform-origin:top left;
         transform:rotate(-90deg) translateX(-100%)}
-  /* 兜底旋转时留一个翻转按钮：手机往哪边转都能看正 */
-  #tflip{display:none;position:fixed;left:50%;bottom:8px;transform:translateX(-50%);
-        padding:6px 12px;background:rgba(8,9,11,.55);border:1px solid rgba(255,255,255,.16);
-        color:rgba(255,235,210,.72);font:9.5px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
-        letter-spacing:.14em;z-index:9;pointer-events:auto;-webkit-tap-highlight-color:transparent}
-  html.rot90 body.playing.touch #tflip,
-  html.rot270 body.playing.touch #tflip{display:block}
-  #tflip:active{background:rgba(255,176,84,.26);color:#fff2dd}
-  /* 手机上的静音开关 */
-  #tmute{display:none;position:fixed;left:50%;top:10px;transform:translateX(-50%);
-        padding:5px 10px;background:rgba(8,9,11,.42);border:1px solid rgba(255,255,255,.14);
-        color:rgba(255,235,210,.62);font:9.5px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;
-        letter-spacing:.12em;z-index:9;pointer-events:auto;-webkit-tap-highlight-color:transparent;
-        white-space:nowrap}
-  body.playing.touch #tmute{display:block}
-  #tmute:active{background:rgba(255,176,84,.26);color:#fff2dd}
+
+  @media (max-width:760px){
+    #gleft{width:52vw;padding-left:14px}
+    #gside{width:40vw;padding-right:14px}
+    #ghead h1{font-size:15px}
+    #netlobby{width:calc(100vw - 28px);left:14px;bottom:14px}
+  }
+  /* 矮屏（手机横屏）：信息板压紧，别顶出屏幕 */
+  @media (max-height:640px){
+    #gtop{height:34px}
+    #gtop .gt-b b{font-size:12.5px}
+    #gleft{padding-top:12px}
+    #ghead h1{font-size:15px}
+    #gnations{margin:8px 16px 8px 0}
+    .gnat{padding:5px 0 6px}
+    .vrow{padding:6px 9px}
+    #ginfo{padding:10px 12px}
+    #gname{font-size:19px}
+    #gfull{font-size:9.5px;margin-top:2px}
+    #gchips{margin-top:6px}
+    #gweap{margin-top:6px;font-size:9.5px}
+    #gstats{margin-top:8px;padding-top:8px;gap:5px}
+    #gdesc,#glegend{display:none}
+    #gside{padding-bottom:12px;gap:9px}
+    #go,#netEnter{padding:7px 12px}
+    #go span,#netEnter span{font-size:12.5px}
+    #go em,#netEnter em{font-size:8px}
+    #goNet{width:88px;font-size:10px}
+  }
+  @media (max-width:620px){
+    #gtop{display:none}
+    #gmain{flex-direction:column}
+    #gleft{width:100%;padding:12px 14px 0}
+    #grid{max-height:38vh}
+    #gside{width:100%;margin-left:0;padding:0 14px 14px;gap:8px}
+    #ginfo{display:none}
+  }
   @media (max-width:560px){
-    #tstick{left:16px;bottom:18px;width:118px;height:118px}
-    #tstick::before{inset:36px}
-    #tfire{right:16px;bottom:18px;width:86px;height:86px}
-    #taim{right:26px;bottom:120px;width:60px;height:60px}
-    #tfree{right:114px;bottom:22px;width:52px;height:52px}
-    #tcrF{right:114px;bottom:84px;width:52px;height:52px}
-    #tcrR{right:114px;bottom:146px;width:52px;height:52px}
-    #tchint{bottom:214px;font-size:9px}
+    #tstick{left:14px;bottom:14px;width:116px;height:116px}
+    #tstick::before{inset:35px}
+    #tfire{right:14px;bottom:14px;width:84px;height:84px}
+    #taim{right:24px;bottom:112px;width:56px;height:56px}
+    #tfree{right:110px;bottom:18px;width:50px;height:40px}
+    #tcrF{right:110px;bottom:64px;width:50px;height:40px}
+    #tcrR{right:110px;bottom:110px;width:50px;height:40px}
+    #tchint{bottom:172px;font-size:9px}
+    #tmute{bottom:150px}
   }
 </style>
 </head>
@@ -325,18 +485,41 @@
 <div id="hitmark"></div>
 <div id="dmg"></div>
 <div id="deadmsg"></div>
-<div id="feed"></div>
 <div id="lockhint" style="opacity:0">点击画面锁定鼠标 · Esc 释放</div>
 
 <div id="hud">
-  <b id="vhname">BMPT</b> <span id="vhwpn">· 30mm ×2</span> · 荒漠试验场<br>
-  <i id="spd">0.0</i> km/h &nbsp; 炮塔 <i id="ty">0</i>° &nbsp; 火炮 <i id="gp">0</i>°<br>
-  弹药 <i id="ammo">320 发</i> &nbsp; 靶标 <i id="kills">0</i> &nbsp; 巡航 <i id="cruise">关</i><br>
-  <span id="hpline" hidden>装甲 <span id="hpbar"><b id="hpfill"></b></span> <i id="hpnum">0</i> &nbsp; 得分 <i id="score">0</i><br></span>
-  <span id="kbdhelp">W/S 油门 · A/D 转向 · 鼠标 瞄准 · 左键 开火 · Shift/右键 炮镜<br>
-  E/Q 巡航 前进/倒车（三档）· 按住 C 自由视角 · M 静音</span><br>
-  <span id="tload" style="color:rgba(255,176,84,.8)"></span>
+  <div id="compass"><div id="compassTrack"></div><i id="compassMark"></i></div>
+  <div id="feed"></div>
+
+  <div id="mmwrap">
+    <canvas id="minimap" width="240" height="240"></canvas>
+    <b id="mmN">N</b>
+    <span id="mmScale">260 m</span>
+  </div>
+
+  <div id="vpanel">
+    <div id="vname"><b id="vhname">BMPT</b><span id="vhwpn">30mm ×2</span></div>
+    <div id="hpline" hidden><span id="hpbar"><i id="hpfill"></i></span><b id="hpnum">0</b></div>
+    <div id="vrows">
+      <div><span>击杀</span><b id="kills">0</b></div>
+      <div><span>得分</span><b id="score">0</b></div>
+      <div><span>炮塔</span><b id="ty">0</b><u>°</u></div>
+    </div>
+    <span id="tload"></span>
+  </div>
+
+  <div id="ammobox">
+    <b id="ammo">320</b>
+    <div id="ammometa"><span>30 mm · 待发</span><i id="reloadbar"><u></u></i></div>
+  </div>
+
+  <div id="spdbox">
+    <b id="spd">0</b><span>km/h</span>
+    <div id="spdsub"><span>巡航</span><b id="cruise">关</b></div>
+    <div id="spdsub2"><span>仰角</span><b id="gp">0.0</b></div>
+  </div>
 </div>
+
 <div id="bench"></div>
 <div id="fatal"></div>
 
@@ -346,62 +529,81 @@
 </div>
 
 <div id="boot">
+  <div id="bootBrand"><b id="bootName">BMPT</b><span>战斗试验场</span></div>
+  <div id="bootPct">0%</div>
   <div id="bootBox">
-    <div id="bootTitle"><b id="bootName">BMPT</b> <span>· 荒漠试验场</span></div>
     <div id="bootSub">正在解析载具数据…</div>
     <div id="bootTrack"><i id="bootFill"></i><b id="bootScan"></b></div>
-    <div id="bootPct">0%</div>
   </div>
 </div>
 
 <div id="garage">
-  <div id="gwrap">
-    <div id="ghead">
-      <div id="gkicker">Combat Test Range · 载具选择</div>
-      <h1>选择你的载具</h1>
-      <div id="gnations"></div>
-      <div id="gsub">Q / E 换阵营 · A / D 换车 · 回车单机测试</div>
-    </div>
-    <div id="grid"></div>
-    <div id="gfoot">
-      <div id="ginfo">
-        <b id="gname">—</b>
-        <span id="gdesc"></span>
+  <div id="gtop">
+    <div class="gt-b"><b>BMPT</b><span>战斗试验场 · 荒漠</span></div>
+    <div class="gt-r"><span>离线 · 单机</span><span>BUILD 0.9.4</span></div>
+  </div>
+
+  <div id="gmain">
+    <div id="gleft">
+      <div id="ghead">
+        <h1>载具库</h1>
+        <div id="gkicker">俄罗斯</div>
       </div>
-      <div id="gbar"><i></i></div>
-      <div id="gload">贴图 0%</div>
-      <button id="go">单机测试</button>
-      <button id="goNet" type="button">联机测试</button>
-      <button id="netEnter" type="button" hidden>进入联机场地</button>
+      <div id="gnations"></div>
+      <div id="grid"></div>
+      <div id="gloadrow">
+        <div id="gbar"><i></i></div>
+        <span id="gload">贴图 0%</span>
+      </div>
     </div>
 
-    <div id="netlobby" hidden>
-      <div id="netForm">
-        <span class="nlabel">联机</span>
-        <input id="netName" maxlength="10" value="车长" title="你的名字">
-        <button id="netCreate" type="button">创建房间</button>
-        <span class="nlsep"></span>
-        <input id="netCode" maxlength="8" placeholder="房间码">
-        <button id="netJoin" type="button">加入</button>
-        <button id="netBack" type="button">收起</button>
+    <div id="gside">
+      <div id="ginfo">
+        <div class="gi-lab">当前载具</div>
+        <div id="gname">—</div>
+        <div id="gfull"></div>
+        <div id="gchips"></div>
+        <div id="gweap"></div>
+        <div id="gstats"></div>
+        <div id="gdesc"></div>
+        <div id="glegend">A/D 选车 · Q/E 换阵营 · Enter 出击<br>
+        W/S 油门 · A/D 转向 · 左键 开火 · Shift 炮镜<br>
+        E/Q 巡航 · 按住 C 自由视角 · M 静音</div>
       </div>
-      <div id="netRoom" hidden>
-        <div class="nroomline">
-          <span class="nlabel">房间</span>
-          <code id="netRoomCode">—</code>
-          <span id="netRole">—</span>
-          <button class="nmini" type="button" data-copy="code">复制房间码</button>
-          <button class="nmini" type="button" data-copy="link">复制链接</button>
-        </div>
-        <div id="roster"></div>
-        <div class="nroomline">
-          <button id="netLeave" type="button">离开房间</button>
-          <span class="nlhint">准备好后点「进入联机场地」开始同步</span>
-        </div>
+      <div id="gfoot">
+        <button id="goNet" type="button">联机</button>
+        <button id="go" type="button"><span>进入战斗</span><em>单机 · 试验场</em></button>
+        <button id="netEnter" type="button" hidden><span>进入联机场地</span><em>已连接房间</em></button>
       </div>
-      <div id="netStatus">单机模式</div>
-      <div id="netHint">联机走 PeerJS 公共信令 + P2P · 房间码 5 位 · 最多 4 人 · 射击 / HP / 得分已同步 · 击毁后 4 秒重生 · 房主退出即解散 · 建议 http 打开</div>
     </div>
+  </div>
+
+  <div id="netlobby" hidden>
+    <div id="netForm">
+      <span class="nlabel">联机</span>
+      <input id="netName" maxlength="10" value="车长" title="你的名字">
+      <button id="netCreate" type="button">创建房间</button>
+      <span class="nlsep"></span>
+      <input id="netCode" maxlength="8" placeholder="房间码">
+      <button id="netJoin" type="button">加入</button>
+      <button id="netBack" type="button">收起</button>
+    </div>
+    <div id="netRoom" hidden>
+      <div class="nroomline">
+        <span class="nlabel">房间</span>
+        <code id="netRoomCode">—</code>
+        <span id="netRole">—</span>
+        <button class="nmini" type="button" data-copy="code">复制房间码</button>
+        <button class="nmini" type="button" data-copy="link">复制链接</button>
+      </div>
+      <div id="roster"></div>
+      <div class="nroomline">
+        <button id="netLeave" type="button">离开房间</button>
+        <span class="nlhint">准备好后点「进入联机场地」开始同步</span>
+      </div>
+    </div>
+    <div id="netStatus">单机模式</div>
+    <div id="netHint">PeerJS 公共信令 · 房间码 5 位 · 最多 4 人 · 房主退出即解散</div>
   </div>
 </div>
 <script src="app.js"></script>
