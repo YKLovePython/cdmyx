@@ -6377,8 +6377,8 @@ function physSetup(){
   PHYS.axleF = front;
   PHYS.axleR = rear;
   PHYS.anchorY = Math.max(0.16, Math.min(0.70, anchorY));
-  /* 静止时弹簧压 0.10 m，车体原点比地面高约 0.04 m（和旧版视觉一致） */
-  PHYS.L0 = PHYS.anchorY + 0.14;
+  /* 静止时弹簧压 0.10 m，车体原点正好落在地面上（和旧版视觉一致） */
+  PHYS.L0 = PHYS.anchorY + 0.10;
 
   /* 尺寸 / 质量 / 惯量 */
   let bb = (meta && meta.bbox) || [[-1.7, 0, -3.0], [1.7, 2.6, 3.0]];
@@ -6414,7 +6414,7 @@ function physReset(){
   const gy = groundH(car.pos[0], car.pos[2]);
   car.pos[1] = gy;
   PHYS.pos[0] = car.pos[0];
-  PHYS.pos[1] = gy + PHYS.comH + 0.04;
+  PHYS.pos[1] = gy + PHYS.comH;
   PHYS.pos[2] = car.pos[2];
   PHYS.vel[0] = PHYS.vel[1] = PHYS.vel[2] = 0;
   PHYS.yaw = car.yaw || 0;
