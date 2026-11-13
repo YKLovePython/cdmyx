@@ -2668,7 +2668,7 @@ function modelPartMat(part, P, mats, travelL, travelR){
       const wz = vm[2]*w.c[0] + vm[6]*w.c[1] + vm[10]*w.c[2] + vm[14];
       /* 目标：轮心在「当地地面 + 模型原始轮心高度」；差值就是这一根悬挂的行程 */
       dy = (groundH(wx, wz) + w.c[1]) - wy;
-      if(dy > 0.13) dy = 0.13; else if(dy < -0.13) dy = -0.13;
+      if(dy > 0.16) dy = 0.16; else if(dy < -0.16) dy = -0.16;
     }
     return M4.mul(M4.mul(mats.vehM, M4.translate(w.c[0], w.c[1] + dy, w.c[2])), M4.rotX(ang));
   }
@@ -6518,18 +6518,18 @@ var RAPIER = (function(){
     所以 stiffness 用 9.81/(N*静下沉) 来定静态下沉，跨车型自动适配。 */
 
 const PHYS_DT      = 1 / 120;     // 固定物理步
-const PHYS_SAG     = 0.12;        // 静态下沉（m）
-const PHYS_L0      = 0.20;        // 悬挂自由长度（m）
-const PHYS_TRAVEL  = 0.22;        // 最大行程（m）
-const PHYS_MU      = 2.3;         // 履带附着系数（frictionSlip）
-const PHYS_SIDE    = 1.35;        // 侧向摩擦刚度
+const PHYS_SAG     = 0.20;        // 静态下沉（m）——越大越软
+const PHYS_L0      = 0.30;        // 悬挂自由长度（m）
+const PHYS_TRAVEL  = 0.32;        // 最大行程（m）
+const PHYS_MU      = 2.0;         // 履带附着系数（frictionSlip）
+const PHYS_SIDE    = 0.80;        // 侧向摩擦刚度（越小转得越轻快）
 
 const PHYS = {
   ready: false, err: null,
   world: null, body: null, veh: null,
   id: '', meta: null,
   mass: 19000, comH: 1.0, comZ: 0, halfW: 1.15,
-  rEff: 0.3, anchorY: 0.3,
+  rEff: 0.3, anchorY: 0.3, Iyaw: 90000,
   contacts: [],                    // { lx, lz, side }
   accum: 0,
   prev: { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 },
@@ -6674,6 +6674,10 @@ function physSetupVehicle(){
   const hullTop = Math.max(1.7, hh * 0.82);
   const hullCy = (hullBot + hullTop) * 0.5;
   const hullHy = (hullTop - hullBot) * 0.5;
+  const colHx = Math.max(0.8, w * 0.45);
+  const colHz = Math.max(1.6, l * 0.45);
+  /* 偏航转动惯量（转向助力用；比均匀长方体略大，计入履带/炮塔） */
+  PHYS.Iyaw = PHYS.mass / 12 * (4 * colHx * colHx + 4 * colHz * colHz) * 1.35;
 
   /* ---- 底盘刚体 ---- */
   const yaw = car.yaw || 0;
@@ -6683,11 +6687,11 @@ function physSetupVehicle(){
     .setTranslation(car.pos[0] + sy * PHYS.comZ, gy + PHYS.comH + 0.03, car.pos[2] + cy * PHYS.comZ)
     .setRotation(qYaw(yaw))
     .setLinearDamping(0.03)
-    .setAngularDamping(0.35)
+    .setAngularDamping(0.25)
     .setCcdEnabled(true);
   const body = PHYS.world.createRigidBody(bd);
 
-  const cd = RAPIER.ColliderDesc.cuboid(Math.max(0.8, w * 0.45), Math.max(0.35, hullHy), Math.max(1.6, l * 0.45))
+  const cd = RAPIER.ColliderDesc.cuboid(colHx, Math.max(0.35, hullHy), colHz)
     .setTranslation(0, hullCy - PHYS.comH, -PHYS.comZ)
     .setMass(PHYS.mass)
     .setFriction(0.6)
@@ -6699,8 +6703,8 @@ function physSetupVehicle(){
   const N = PHYS.contacts.length;
   const cSag = PHYS_SAG;
   const stiff = 9.81 / (N * cSag);              // 静态下沉 = cSag
-  const comp  = 1.25 * 8 / N;                   // 压缩阻尼
-  const relax = 1.85 * 8 / N;                   // 回弹阻尼
+  const comp  = 4.9 / N;                        // 压缩阻尼（ζ≈0.35）
+  const relax = 7.7 / N;                        // 回弹阻尼（ζ≈0.55）
   const maxF  = PHYS.mass * 9.81 / N * 4.0;
   const connY = PHYS_L0 + PHYS.rEff - cSag;     // 悬挂连接点（模型局部 y）
 
@@ -6873,6 +6877,7 @@ function physDrive(dt, thr, str){
   const q = b.rotation(_q);
   const m = quatMat(q.x, q.y, q.z, q.w, _m3);
   const fwd = [m[0][2], m[1][2], m[2][2]];
+  const up  = [m[0][1], m[1][1], m[2][1]];
   const v = b.linvel(_v);
   const vF = v.x * fwd[0] + v.y * fwd[1] + v.z * fwd[2];
 
@@ -6886,9 +6891,29 @@ function physDrive(dt, thr, str){
 
   /* 差速转向：左侧推力 +，右侧推力 -，str > 0 向左（A） */
   const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
-  const steer = str * PHYS.mass * 1.5 * (1 - 0.60 * spdK);
+  const steer = str * PHYS.mass * 1.0 * (1 - 0.35 * spdK);
 
   const N = PHYS.contacts.length || 1;
+
+  /* ---- 转向助力 ----
+     只靠履带差速，履带侧向摩擦会把车“锁”得很慢。这里在车体上
+     绕自身 up 轴加一个受限的偏航力矩，目标角速度随速度收窄：
+     原地约 72°/s，高速约 30°/s。仍然是角冲量，不是直接改朝向。 */
+  let onGround = 0;
+  for(let i = 0; i < N; i++){
+    if(PHYS.veh.wheelIsInContact(i)){ onGround++; if(onGround > 1) break; }
+  }
+  if(onGround && Math.abs(str) > 0.02){
+    const av = b.angvel(_av);
+    const yawRate = av.x * up[0] + av.y * up[1] + av.z * up[2];
+    const base = (V.turnRate || 2.2) * 0.55;
+    const target = str * base * (1 - 0.60 * spdK);
+    let tau = (target - yawRate) * PHYS.Iyaw * 6.0;
+    const tmax = PHYS.Iyaw * 2.6;
+    tau = pc(tau, -tmax, tmax);
+    b.applyTorqueImpulse({ x: up[0] * tau * dt, y: up[1] * tau * dt, z: up[2] * tau * dt }, true);
+  }
+
   const idle = Math.abs(thr) < 0.06;
   const brake = idle ? PHYS.mass * 6.0 * dt / N : 0;
 
