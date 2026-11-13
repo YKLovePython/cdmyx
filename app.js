@@ -6797,17 +6797,10 @@ function physSync(alpha){
   car.vR = vF + half;
   car.prevV = vF;
 
-  /* 履带里程：直接用 Rapier 的轮子转角（弧度），按左右取平均 */
-  let sL = 0, nL = 0, sR = 0, nR = 0;
-  if(PHYS.veh){
-    for(let i = 0; i < PHYS.contacts.length; i++){
-      const rot = PHYS.veh.wheelRotation(i);
-      if(rot == null) continue;
-      if(PHYS.contacts[i].lx > 0){ sL += rot; nL++; } else { sR += rot; nR++; }
-    }
-  }
-  car.travelL = (nL ? sL / nL : 0) * PHYS.rEff;
-  car.travelR = (nR ? sR / nR : 0) * PHYS.rEff;
+  /* 履带里程：按左右履带的线速度积分（原地转向时两侧反向，
+     比读物理轮子的滚动角更符合履带实际动作） */
+  car.travelL = PHYS.travelL;
+  car.travelR = PHYS.travelR;
 
   PHYS.visOx = ox; PHYS.visOz = oz; PHYS.visYaw = car.yaw;
 }
@@ -6877,7 +6870,6 @@ function physDrive(dt, thr, str){
   const q = b.rotation(_q);
   const m = quatMat(q.x, q.y, q.z, q.w, _m3);
   const fwd = [m[0][2], m[1][2], m[2][2]];
-  const up  = [m[0][1], m[1][1], m[2][1]];
   const v = b.linvel(_v);
   const vF = v.x * fwd[0] + v.y * fwd[1] + v.z * fwd[2];
 
@@ -6889,31 +6881,11 @@ function physDrive(dt, thr, str){
   let drive = (vT - vF) * PHYS.mass * 1.5;
   drive = pc(drive, -PHYS.mass * 4.0, PHYS.mass * 4.0);
 
-  /* 差速转向：左侧推力 +，右侧推力 -，str > 0 向左（A） */
+  /* 履带差速：左侧推力 +，右侧推力 -，str > 0 向左（A） */
   const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
-  const steer = str * PHYS.mass * 1.0 * (1 - 0.35 * spdK);
+  const steer = str * PHYS.mass * 0.8 * (1 - 0.35 * spdK);
 
   const N = PHYS.contacts.length || 1;
-
-  /* ---- 转向助力 ----
-     只靠履带差速，履带侧向摩擦会把车“锁”得很慢。这里在车体上
-     绕自身 up 轴加一个受限的偏航力矩，目标角速度随速度收窄：
-     原地约 72°/s，高速约 30°/s。仍然是角冲量，不是直接改朝向。 */
-  let onGround = 0;
-  for(let i = 0; i < N; i++){
-    if(PHYS.veh.wheelIsInContact(i)){ onGround++; if(onGround > 1) break; }
-  }
-  if(onGround && Math.abs(str) > 0.02){
-    const av = b.angvel(_av);
-    const yawRate = av.x * up[0] + av.y * up[1] + av.z * up[2];
-    const base = (V.turnRate || 2.2) * 0.55;
-    const target = str * base * (1 - 0.60 * spdK);
-    let tau = (target - yawRate) * PHYS.Iyaw * 6.0;
-    const tmax = PHYS.Iyaw * 2.6;
-    tau = pc(tau, -tmax, tmax);
-    b.applyTorqueImpulse({ x: up[0] * tau * dt, y: up[1] * tau * dt, z: up[2] * tau * dt }, true);
-  }
-
   const idle = Math.abs(thr) < 0.06;
   const brake = idle ? PHYS.mass * 6.0 * dt / N : 0;
 
@@ -6924,6 +6896,45 @@ function physDrive(dt, thr, str){
     PHYS.veh.setWheelEngineForce(i, f);
     PHYS.veh.setWheelBrake(i, brake);
     PHYS.veh.setWheelSteering(i, 0);
+  }
+}
+
+/* ---------------------------------------------------------------- 偏航速率控制 */
+/*  Rapier 的履带侧向摩擦会把“原地转向”锁得很死（每侧 6 个接地点一起
+    抵抗偏航，光靠差速推力基本转不动）。这里在物理步之后直接把车体
+    绕自身 up 轴的角速度拉向目标值：
+      · 原地约 80°/s，高速约 28°/s（随速度收窄，防止甩翻）
+      · 松手后用较慢的衰减回 0，保留一点惯性
+    只改 yaw 角速度，pitch/roll/悬挂/重力仍然全由 Rapier 算。 */
+function physYawAssist(dt, str){
+  const b = PHYS.body;
+  if(!b || !PHYS.veh) return;
+  let grounded = false;
+  for(let i = 0; i < PHYS.contacts.length; i++){
+    if(PHYS.veh.wheelIsInContact(i)){ grounded = true; break; }
+  }
+  if(!grounded) return;
+
+  const V = (typeof VEH !== 'undefined' && VEH) ? VEH : (VEHICLES && VEHICLES.bmpt) || {};
+  const q = b.rotation(_q);
+  const m = quatMat(q.x, q.y, q.z, q.w, _m3);
+  const fwd = [m[0][2], m[1][2], m[2][2]];
+  const up  = [m[0][1], m[1][1], m[2][1]];
+  const v = b.linvel(_v);
+  const vF = v.x * fwd[0] + v.y * fwd[1] + v.z * fwd[2];
+  const maxS = V.maxSpeed || 15.5;
+  const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
+
+  const av = b.angvel(_av);
+  const yawRate = av.x * up[0] + av.y * up[1] + av.z * up[2];
+  const target = str * (V.turnRate || 2.2) * 0.60 * (1 - 0.65 * spdK);
+  let delta = (target - yawRate) * (Math.abs(str) > 0.02 ? 1.0 : 0.22);
+  const lim = 16 * dt;
+  delta = pc(delta, -lim, lim);
+  if(Math.abs(delta) > 1e-5){
+    b.setAngvel({ x: av.x + up[0] * delta,
+                  y: av.y + up[1] * delta,
+                  z: av.z + up[2] * delta }, true);
   }
 }
 
@@ -6953,12 +6964,19 @@ function physStep(dt, thr, str){
     physDrive(PHYS_DT, thr, str);
     PHYS.veh.updateVehicle(PHYS_DT, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC);
     PHYS.world.step();
+    physYawAssist(PHYS_DT, str);
     PHYS.accum -= PHYS_DT;
     steps++;
   }
   if(steps === 6 && PHYS.accum >= PHYS_DT) PHYS.accum = 0;
 
   physSync(PHYS.accum / PHYS_DT);
+
+  /* 履带视觉行程：按左右履带线速度积分（原地转向时两侧反向） */
+  PHYS.travelL += car.vL * dt;
+  PHYS.travelR += car.vR * dt;
+  car.travelL = PHYS.travelL;
+  car.travelR = PHYS.travelR;
 }
 
 /* ---------------------------------------------------------------- 启动 Rapier */
