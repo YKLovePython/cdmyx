@@ -6521,8 +6521,10 @@ const PHYS_DT      = 1 / 120;     // 固定物理步
 const PHYS_SAG     = 0.20;        // 静态下沉（m）——越大越软
 const PHYS_L0      = 0.46;        // 悬挂自由长度（m）
 const PHYS_TRAVEL  = 0.46;        // 最大行程（m）——长行程吸落地冲击
-const PHYS_MU      = 2.0;         // 履带附着系数（frictionSlip）
-const PHYS_SIDE    = 0.80;        // 侧向摩擦刚度（越小转得越轻快）
+const PHYS_MU_LONG = 0.85;        // 履带纵向附着（驱动/制动）
+const PHYS_MU_LAT  = 0.38;        // 履带横向附着（侧滑；比纵向低，才能原地转向）
+const PHYS_ENGINE  = 4.0;         // 总驱动力 / 质量（≈4 m/s²）
+const PHYS_STEER_F = 4.2;         // 每侧差速推力 / 质量
 
 const PHYS = {
   ready: false, err: null,
@@ -6530,7 +6532,7 @@ const PHYS = {
   id: '', meta: null,
   mass: 19000, comH: 1.0, comZ: 0, halfW: 1.15,
   rEff: 0.3, anchorY: 0.3, Iyaw: 90000,
-  trackV: 0, steerSpd: 0,            // 履带目标线速度 / 左右差速（视觉用）
+  trackV: 0, steerSpd: 0, steerForce: 0,  // 履带目标速度 / 差速速度 / 差速推力
   contacts: [],                    // { lx, lz, side }
   accum: 0,
   prev: { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 },
@@ -6723,15 +6725,15 @@ function physSetupVehicle(){
     veh.setWheelSuspensionRelaxation(i, relax);
     veh.setWheelMaxSuspensionTravel(i, PHYS_TRAVEL);
     veh.setWheelMaxSuspensionForce(i, maxF);
-    veh.setWheelFrictionSlip(i, PHYS_MU);
-    veh.setWheelSideFrictionStiffness(i, PHYS_SIDE);
+    veh.setWheelFrictionSlip(i, 0.001);          // 关闭车身自带的轮胎摩擦
+    veh.setWheelSideFrictionStiffness(i, 0.0);   // 履带纵/横摩擦由下面 physTrackForces 算
   }
 
   PHYS.body = body;
   PHYS.veh = veh;
   PHYS.ready = true;
   PHYS.accum = 0;
-  PHYS.trackV = PHYS.steerSpd = 0;
+  PHYS.trackV = PHYS.steerSpd = PHYS.steerForce = 0;
 
   console.log(`  物理：${PHYS.id || '?'}  ${(PHYS.mass / 1000).toFixed(1)} t  ` +
               `Rapier 悬挂 ${N} 点  r=${PHYS.rEff.toFixed(2)} m  ` +
@@ -6830,7 +6832,7 @@ function physReset(){
   }
   PHYS.accum = 0;
   PHYS.travelL = PHYS.travelR = 0;
-  PHYS.trackV = PHYS.steerSpd = 0;
+  PHYS.trackV = PHYS.steerSpd = PHYS.steerForce = 0;
   physSnapPrev();
   physSync(1);
 }
@@ -6860,7 +6862,7 @@ function physHalt(){
       PHYS.veh.setWheelSteering(i, 0);
     }
   }
-  PHYS.trackV = PHYS.steerSpd = 0;
+  PHYS.trackV = PHYS.steerSpd = PHYS.steerForce = 0;
   physSnapPrev();
   physSync(1);
 }
@@ -6880,35 +6882,93 @@ function physDrive(dt, thr, str){
   const maxS = V.maxSpeed || 15.5;
   const revS = V.reverseSpeed || 6.5;
   const vT = thr >= 0 ? thr * maxS : thr * revS;
-
-  /* 速度闭环：上坡时力会自动加大，到目标速度自动收油 */
-  let drive = (vT - vF) * PHYS.mass * 1.5;
-  drive = pc(drive, -PHYS.mass * 4.0, PHYS.mass * 4.0);
-
   const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
-  const idle = Math.abs(thr) < 0.06;
 
-  /* ---- 履带差速 ----
-     参考常见坦克控制器（brihernandez/PhysicsTankExample 的左右履带马达、
-     RuanLucasGD/Simple-Militay-Tank-Physics 的轮位侧向力）：
-     左右履带给不同的推力，车体靠地面摩擦/履带滑移自己转起来。
-     这里不直接改车体朝向。 */
-  const steerF = str * PHYS.mass * 4.5 * (1 - 0.65 * spdK);   // 每侧额外推力（N）
-  PHYS.trackV += (vT - PHYS.trackV) * Math.min(1, dt * 7.0);  // 履带目标速度（视觉/音效）
-  PHYS.steerSpd = str * (V.turnRate || 2.2) * PHYS.halfW * (1 - 0.35 * spdK);
+  /* 履带目标线速度（一阶滤波），以及左右履带的差速。
+     转向靠 physTrackForces 里把这些目标速度变成左右履带的纵向力，
+     再由地面摩擦/滑移让车体自己转，不直接改车体朝向。 */
+  PHYS.trackV += (vT - PHYS.trackV) * Math.min(1, dt * 7.0);
+  PHYS.steerForce = str * PHYS.mass * PHYS_STEER_F * (1 - 0.55 * spdK);
+  PHYS.steerSpd   = str * (V.turnRate || 2.2) * PHYS.halfW * (1 - 0.35 * spdK);
 
-  const N = PHYS.contacts.length || 1;
+  /* Rapier 车辆控制器只负责悬挂/射线；轮胎纵/横力在 physTrackForces 里算 */
+  for(let i = 0; i < PHYS.contacts.length; i++){
+    PHYS.veh.setWheelEngineForce(i, 0);
+    PHYS.veh.setWheelBrake(i, 0);
+    PHYS.veh.setWheelSteering(i, 0);
+  }
+}
+
+/* ---------------------------------------------------------------- 履带力 */
+/*  参考坦克履带模型（左右履带纵向推力 + 履带横向摩擦）：
+      · 每侧履带目标速度 = 油门目标 ± 差速
+      · 纵向力 = 滑移量 × 刚度，受 μ_long·N 限制
+      · 横向力 = 侧滑速度 × 刚度，受 μ_lat·N 限制（μ_lat 明显低于 μ_long）
+      · 力作用在每个负重轮的接地点上
+    Rapier 的 car 轮胎模型是“高横向抓地”，原地转向推不动；坦克需要
+    单独区分纵向/横向附着，这也是 War Thunder / 常见坦克控制器的做法。 */
+function physTrackForces(dt){
+  const b = PHYS.body, veh = PHYS.veh;
+  if(!b || !veh) return;
+  const N = PHYS.contacts.length;
+  if(!N) return;
+
   const sideN = Math.max(1, N / 2);
-  const brake = idle ? PHYS.mass * 6.0 * dt / N : 0;
+  const capDrive = PHYS.mass * PHYS_ENGINE / N;        // 每个接地点的驱动上限
+  const steerC = (PHYS.steerForce || 0) / sideN;       // 每个接地点的差速推力
+  const base = PHYS.trackV;
+
+  const q = b.rotation(_q);
+  const m = quatMat(q.x, q.y, q.z, q.w, _m3);
+  const fwd = [m[0][2], m[1][2], m[2][2]];
+
+  const p = { x: 0, y: 0, z: 0 };
+  const n = { x: 0, y: 1, z: 0 };
+  const vc = { x: 0, y: 0, z: 0 };
 
   for(let i = 0; i < N; i++){
-    const c = PHYS.contacts[i];
-    let f = drive / N;
-    /* 模型 -X（屏幕右侧）加推力、+X（屏幕左侧）减推力：str>0 向左转 */
-    f += (c.lx < 0 ? steerF : -steerF) / sideN;
-    PHYS.veh.setWheelEngineForce(i, f);
-    PHYS.veh.setWheelBrake(i, brake);
-    PHYS.veh.setWheelSteering(i, 0);
+    if(!veh.wheelIsInContact(i)) continue;
+    const load = veh.wheelSuspensionForce(i) || 0;
+    if(load <= 1) continue;
+
+    const cp = veh.wheelContactPoint(i, p);
+    const cn = veh.wheelContactNormal(i, n);
+    if(!cp || !cn) continue;
+
+    /* 履带纵向 = 车体前向投影到接触平面 */
+    const nd = fwd[0]*cn.x + fwd[1]*cn.y + fwd[2]*cn.z;
+    let fx = fwd[0] - cn.x*nd, fy = fwd[1] - cn.y*nd, fz = fwd[2] - cn.z*nd;
+    const fl = Math.hypot(fx, fy, fz);
+    if(fl < 0.25) continue;
+    fx /= fl; fy /= fl; fz /= fl;
+
+    /* 横向 = n × f */
+    let lx = cn.y*fz - cn.z*fy;
+    let ly = cn.z*fx - cn.x*fz;
+    let lz = cn.x*fy - cn.y*fx;
+    const ll = Math.hypot(lx, ly, lz) || 1;
+    lx /= ll; ly /= ll; lz /= ll;
+
+    const vp = b.velocityAtPoint(cp, vc);
+    const vLong = vp.x*fx + vp.y*fy + vp.z*fz;
+    const vLat  = vp.x*lx + vp.y*ly + vp.z*lz;
+
+    /* 纵向：滑移控制 + 左右差速 */
+    let Fd = (base - vLong) * (PHYS.mass / N) * 10.0;
+    Fd = pc(Fd, -capDrive, capDrive);
+    const Fs = (PHYS.contacts[i].lx < 0 ? 1 : -1) * steerC;
+    const limL = PHYS_MU_LONG * load;
+    let F = pc(Fd + Fs, -limL, limL);
+
+    /* 横向：履带侧滑摩擦 */
+    const limT = PHYS_MU_LAT * load;
+    let FL = -vLat * (PHYS.mass / N) * 9.0;
+    FL = pc(FL, -limT, limT);
+
+    const ix = (fx*F + lx*FL) * dt;
+    const iy = (fy*F + ly*FL) * dt;
+    const iz = (fz*F + lz*FL) * dt;
+    b.applyImpulseAtPoint({ x: ix, y: iy, z: iz }, cp, true);
   }
 }
 
@@ -6937,6 +6997,7 @@ function physStep(dt, thr, str){
     physSnapPrev();
     physDrive(PHYS_DT, thr, str);
     PHYS.veh.updateVehicle(PHYS_DT, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC);
+    physTrackForces(PHYS_DT);
     PHYS.world.step();
     PHYS.accum -= PHYS_DT;
     steps++;
