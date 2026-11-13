@@ -1535,7 +1535,7 @@ const VEHICLES = {
   ztz99a: {
     id: 'ztz99a', name: 'ZTZ99A', full: 'ZTZ99A 主战坦克', tag: 'ZTZ99A',
     nation: 'cn', era: 'modern', role: 'mbt',
-    muzzlePair: false, trackDir: -1,
+    muzzlePair: false, trackDir: -1, mg: '12.7',
     maxSpeed: 15.8, reverseSpeed: 6.4, turnRate: 2.20,
     turretRate: 0.80, gunRate: 0.42,
     gunMin: -0.12, gunMax: 0.34,
@@ -1548,7 +1548,7 @@ const VEHICLES = {
   t90m: {
     id: 't90m', name: 'T-90M', full: 'T-90M 突破', tag: 'T90M',
     nation: 'ru', era: 'modern', role: 'mbt',
-    muzzlePair: false, trackDir: -1,
+    muzzlePair: false, trackDir: -1, mg: '12.7',
     maxSpeed: 15.2, reverseSpeed: 6.0, turnRate: 2.10,
     turretRate: 0.65, gunRate: 0.38,
     gunMin: -0.12, gunMax: 0.34,
@@ -1574,7 +1574,7 @@ const VEHICLES = {
   m1a2: {
     id: 'm1a2', name: 'M1A2', full: 'M1A2 SEPv3 艾布拉姆斯', tag: 'M1A2',
     nation: 'us', era: 'modern', role: 'mbt',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '12.7',
     maxSpeed: 16.0, reverseSpeed: 6.4, turnRate: 2.15,
     turretRate: 0.72, gunRate: 0.45,
     gunMin: -0.12, gunMax: 0.34,
@@ -1587,7 +1587,7 @@ const VEHICLES = {
   t10m: {
     id: 't10m', name: 'T-10M', full: 'T-10M 重型坦克', tag: 'T10M',
     nation: 'ru', era: 'cold', role: 'mbt',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '14.5',
     maxSpeed: 13.5, reverseSpeed: 5.2, turnRate: 1.75,
     turretRate: 0.35, gunRate: 0.28,
     gunMin: -0.10, gunMax: 0.32,
@@ -1615,7 +1615,7 @@ const VEHICLES = {
   tam2c: {
     id: 'tam2c', name: 'TAM 2C', full: 'TAM 2C 轻型主战坦克', tag: 'TAM2C',
     nation: 'de', era: 'modern', role: 'mbt',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '7.62',
     maxSpeed: 17.0, reverseSpeed: 7.0, turnRate: 2.45,
     turretRate: 0.85, gunRate: 0.50,
     gunMin: -0.10, gunMax: 0.30,
@@ -1654,7 +1654,7 @@ const VEHICLES = {
   tristab: {
     id: 'tristab', name: '3-Achs', full: '三轴炮塔试验车', tag: 'TRISTAB',
     nation: 'de', era: 'cold', role: 'mbt',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '7.62',
     maxSpeed: 16.0, reverseSpeed: 6.0, turnRate: 2.30,
     turretRate: 0.90, gunRate: 0.50,
     gunMin: -0.10, gunMax: 0.30,
@@ -1693,7 +1693,7 @@ const VEHICLES = {
   pz4h: {
     id: 'pz4h', name: 'Pz.IV H', full: '四号坦克 H 型', tag: 'PZ4H',
     nation: 'de', era: 'ww2', role: 'mbt',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '7.92',
     maxSpeed: 14.0, reverseSpeed: 5.2, turnRate: 2.20,
     turretRate: 0.70, gunRate: 0.50,
     gunMin: -0.09, gunMax: 0.24,
@@ -1797,7 +1797,7 @@ const VEHICLES = {
   tiger2: {
     id: 'tiger2', name: 'Tiger II', full: '虎王 重型坦克', tag: 'TIGER2',
     nation: 'de', era: 'ww2', role: 'mbt',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '7.92',
     maxSpeed: 12.0, reverseSpeed: 4.6, turnRate: 1.75,
     turretRate: 0.38, gunRate: 0.30,
     gunMin: -0.08, gunMax: 0.18,
@@ -1823,7 +1823,7 @@ const VEHICLES = {
   leo2pl: {
     id: 'leo2pl', name: 'Leopard 2PL', full: '豹 2PL 主战坦克', tag: 'LEO2PL',
     nation: 'de', era: 'modern', role: 'mbt',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '7.62',
     maxSpeed: 16.0, reverseSpeed: 6.4, turnRate: 2.10,
     turretRate: 0.70, gunRate: 0.44,
     gunMin: -0.10, gunMax: 0.32,
@@ -1836,7 +1836,7 @@ const VEHICLES = {
   leo2a4: {
     id: 'leo2a4', name: 'Leopard 2A4', full: '豹 2A4 主战坦克', tag: 'LEO2A4',
     nation: 'de', era: 'modern', role: 'mbt',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '7.62',
     maxSpeed: 16.2, reverseSpeed: 6.5, turnRate: 2.10,
     turretRate: 0.72, gunRate: 0.45,
     gunMin: -0.10, gunMax: 0.32,
@@ -1849,7 +1849,7 @@ const VEHICLES = {
   leo2a7v: {
     id: 'leo2a7v', name: 'Leopard 2A7V', full: '豹 2A7V 主战坦克', tag: 'LEO2A7V',
     nation: 'de', era: 'modern', role: 'mbt',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '7.62',
     maxSpeed: 15.8, reverseSpeed: 6.3, turnRate: 2.05,
     turretRate: 0.75, gunRate: 0.47,
     gunMin: -0.10, gunMax: 0.32,
@@ -1862,7 +1862,7 @@ const VEHICLES = {
   pantherg: {
     id: 'pantherg', name: 'Panther G', full: '豹式坦克 G 型', tag: 'PANTHERG',
     nation: 'de', era: 'ww2', role: 'mbt',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '7.92',
     maxSpeed: 14.0, reverseSpeed: 5.0, turnRate: 2.00,
     turretRate: 0.55, gunRate: 0.38,
     gunMin: -0.08, gunMax: 0.18,
@@ -1901,7 +1901,7 @@ const VEHICLES = {
   wiesel: {
     id: 'wiesel', name: 'Wiesel', full: '鼬鼠 1A2 反坦克导弹车', tag: 'WIESEL',
     nation: 'de', era: 'modern', role: 'td',
-    muzzlePair: false, trackDir: 1,
+    muzzlePair: false, trackDir: 1, mg: '7.62',
     maxSpeed: 18.5, reverseSpeed: 8.0, turnRate: 2.90,
     turretRate: 1.20, gunRate: 0.75,
     gunMin: -0.10, gunMax: 0.55,
@@ -2034,6 +2034,8 @@ let TRACK_DIR   = 1;
 /* 炮塔 / 火炮枢轴：切车时由 applyVehicle() 更新，其它模块只读这几个变量 */
 let PIVOT_TURRET = [0, 1.50, -0.55];
 let PIVOT_GUN    = [0, 2.10, -0.15];
+/* 车顶机枪转轴（炮塔坐标系，模型局部 +Z 为枪口方向）。没有机枪的车为 null */
+let PIVOT_MG     = null;
 /* 炮口（炮管坐标系）左 / 右 */
 let GUN_MUZZLE = [[-0.17, 2.12, 2.13], [0.17, 2.12, 2.13]];
 /* 炮镜眼点（炮管坐标系） */
@@ -2446,6 +2448,7 @@ function modelMetalBase(part){
   if(part === 'trackL' || part === 'trackR') return 0.55;
   if(part.lastIndexOf('wheel:', 0) === 0) return 0.30;
   if(part === 'gun') return 0.40;
+  if(part === 'mg')  return 0.46;
   if(part === 'turret' || part === 'hull') return 0.18;
   return 0.20;
 }
@@ -2459,6 +2462,7 @@ const MODEL_VEH = { parts: [], wheels: [], tracks: [], pathTex: null,
 function modelPartMat(part, P, mats, travelL, travelR){
   if(part === 'turret') return mats.turretM;
   if(part === 'gun')    return mats.gunM;
+  if(part === 'mg')     return mats.mgM || mats.turretM;
   if(part.lastIndexOf('wheel:', 0) === 0){
     const w = P.meta.wheels[+part.slice(6)];
     if(!w) return mats.vehM;
@@ -2482,6 +2486,7 @@ function modelVisible(part){
   if(part === 'hull')   return !HIDE.has('hull');
   if(part === 'turret') return !HIDE.has('turret');
   if(part === 'gun')    return !HIDE.has('gun');
+  if(part === 'mg')     return !HIDE.has('mg');
   if(part === 'trackL' || part === 'trackR') return !HIDE.has('track');
   return !HIDE.has('wheels');
 }
@@ -3410,13 +3415,19 @@ function spawnSparks(p, n, power){
   }
 }
 
-function damageTarget(tg, dmg, ip, t){
+function damageTarget(tg, dmg, ip, t, isMG){
   tg.hp -= dmg;
   tg.flash = 1.0;
   tg.lastHit = t;
-  hitFlash = 1.0;
-  spawnSparks(ip, 7, 1.0);
-  sndPing(ip, 0.42, 1.0);
+  if(isMG){
+    hitFlash = Math.max(hitFlash, 0.35);
+    spawnSparks(ip, 2, 0.55);
+    if(Math.random() < 0.25) sndPing(ip, 0.22, 1.15);
+  } else {
+    hitFlash = 1.0;
+    spawnSparks(ip, 7, 1.0);
+    sndPing(ip, 0.42, 1.0);
+  }
   if(tg.hp <= 0 && tg.state === 'up'){
     tg.state = 'falling';
     tg.tilt = Math.max(tg.tilt, 0.015);
@@ -3490,14 +3501,18 @@ function netBlowUp(p){
 /* ---------------- 弹道推进 ---------------- */
 function stepShell(s, dt, t){
   const v = s.v, p = s.p;
+  const g   = s.g   == null ? WPN.g   : s.g;
+  const dmg = s.dmg == null ? WPN.dmg : s.dmg;
   const speed = Math.hypot(v[0], v[1], v[2]);
-  const n = Math.max(1, Math.min(20, Math.ceil(speed * dt / 1.5)));
+  /* 机枪弹速度低、精度要求也低，用更长的线段少跑子步 */
+  const seg = s.mg ? 2.6 : 1.5;
+  const n = Math.max(1, Math.min(20, Math.ceil(speed * dt / seg)));
   const h = dt / n;
 
   for(let k=0;k<n;k++){
     const ax = p[0], ay = p[1], az = p[2];
     p[0] += v[0]*h; p[1] += v[1]*h; p[2] += v[2]*h;
-    v[1] -= WPN.g * h;
+    v[1] -= g * h;
 
     if(!s.ghost){
       // 靶标
@@ -3508,7 +3523,7 @@ function stepShell(s, dt, t){
         const hitT = targetHit(tg, [ax,ay,az], p);
         if(hitT >= 0){
           const ip = [ax + (p[0]-ax)*hitT, ay + (p[1]-ay)*hitT, az + (p[2]-az)*hitT];
-          damageTarget(tg, WPN.dmg, ip, t);
+          damageTarget(tg, dmg, ip, t, s.mg);
           s.alive = false;
           return;
         }
@@ -3517,10 +3532,17 @@ function stepShell(s, dt, t){
       // 远端玩家：本机判定 + 上报房主结算（房主是权威 HP）
       const rh = netRemoteHit([ax,ay,az], p);
       if(rh){
-        hitFlash = 1.0;
-        spawnSparks(rh.point, 8, 1.15);
-        sndPing(rh.point, 0.55, 1.25);
-        netAfterHit(rh.slot, WPN.dmg);
+        if(s.mg){
+          /* 小口径单发伤害不足 1，先在本机累积，mgUpdate 每 0.3s 汇总 */
+          mg.hits.set(rh.slot, (mg.hits.get(rh.slot) || 0) + dmg);
+          spawnSparks(rh.point, 2, 0.65);
+          if(Math.random() < 0.22) sndPing(rh.point, 0.26, 1.2);
+        } else {
+          hitFlash = 1.0;
+          spawnSparks(rh.point, 8, 1.15);
+          sndPing(rh.point, 0.55, 1.25);
+          netAfterHit(rh.slot, dmg);
+        }
         s.alive = false;
         return;
       }
@@ -3529,7 +3551,8 @@ function stepShell(s, dt, t){
     // 地面
     if(p[1] <= 0){
       const f = ay / Math.max(1e-6, ay - p[1]);
-      groundImpact([ax + (p[0]-ax)*f, 0, az + (p[2]-az)*f]);
+      const gp = [ax + (p[0]-ax)*f, 0, az + (p[2]-az)*f];
+      if(s.mg) mgGroundImpact(gp); else groundImpact(gp);
       s.alive = false;
       return;
     }
@@ -3580,6 +3603,185 @@ function traceShot(){
   return _trace;
 }
 
+/* ============================ 车顶高射机枪 ============================ */
+/*  口径决定射速 / 初速 / 伤害 / 过热速度。弹药不是弹匣而是过热条：
+    连射到 1.0 强制停火，冷却回 0.35 才能再打。
+    枪身是烘焙出的独立 mg 组，绕 mgPivot 做偏航 + 俯仰。               */
+
+const MG_CAL = {
+  '7.62': { rpm: 700, v0: 840, spread: 0.0046, dmg: 1.4, heat: 0.0105, cool: 0.26, tracer: 3 },
+  '7.92': { rpm: 900, v0: 790, spread: 0.0050, dmg: 1.7, heat: 0.0120, cool: 0.26, tracer: 3 },
+  '12.7': { rpm: 540, v0: 880, spread: 0.0036, dmg: 3.2, heat: 0.0160, cool: 0.21, tracer: 2 },
+  '14.5': { rpm: 470, v0: 900, spread: 0.0032, dmg: 3.8, heat: 0.0180, cool: 0.21, tracer: 2 },
+};
+
+let MG = null;                 // 当前车的车顶枪（静态数据）；没有枪为 null
+
+const mg = {
+  yaw: 0, pitch: 0,            // 当前姿态（相对炮塔）
+  wantYaw: 0, wantPitch: 0,
+  heat: 0, locked: false,      // 过热 / 强制停火
+  next: 0, tracers: 0,
+  fire: false,                 // 上一帧是否在开火（联机起止用）
+  netT: 0,                     // 联机位置同步节流
+  hits: new Map(),             // 联机伤害累积 slot -> dmg
+  hitT: 0,
+  flash: 0,                    // 过热 HUD 红闪
+};
+
+const MG_RATE = 7.0;           // 追瞄角速度 rad/s（偏航）：90° 甩枪约 0.22 s
+const MG_PITCH_RATE = 5.2;     // 俯仰同比例，略慢一点
+
+function mgApply(V, meta){
+  const cal = V && V.mg;
+  if(!cal || !meta || !meta.mgPivot || !meta.mgMuzzle){
+    MG = null;
+    PIVOT_MG = null;
+    mg.yaw = mg.pitch = mg.wantYaw = mg.wantPitch = 0;
+    mg.heat = 0; mg.locked = false; mg.fire = false;
+    mg.hits.clear();
+    return;
+  }
+  const lim = meta.mgYaw || [-1.75, 1.75];
+  const pit = meta.mgPitch || [-0.17, 1.25];
+  MG = {
+    pivot: meta.mgPivot,
+    muzzle: meta.mgMuzzle,
+    cal: cal,
+    spec: MG_CAL[cal] || MG_CAL['7.62'],
+    yawMin: lim[0], yawMax: lim[1],
+    pitchMin: pit[0], pitchMax: pit[1],
+  };
+  PIVOT_MG = MG.pivot;
+  mg.yaw = mg.pitch = 0;
+  mg.wantYaw = mg.wantPitch = 0;
+  mg.heat = 0; mg.locked = false; mg.next = 0; mg.tracers = 0; mg.fire = false;
+  mg.netT = 0; mg.hitT = 0; mg.flash = 0;
+  mg.hits.clear();
+}
+
+/* 枪口世界坐标 / 枪管方向：mgM 的 +Z */
+function mgMuzzleWorld(){
+  return M4.point(mgM, MG.muzzle);
+}
+function mgDirWorld(){
+  return norm3([mgM[8], mgM[9], mgM[10]]);
+}
+
+function mgFire(t){
+  buildMatrices();
+  const spec = MG.spec;
+  const mz = mgMuzzleWorld();
+  const dir = mgDirWorld();
+
+  const sp = spec.spread;
+  const d = norm3([
+    dir[0] + (Math.random()-0.5)*2*sp,
+    dir[1] + (Math.random()-0.5)*2*sp,
+    dir[2] + (Math.random()-0.5)*2*sp,
+  ]);
+
+  /* 每 tracer 发才画曳光/亮光，否则 700 rpm 会糊成一片 */
+  const tr = (mg.tracers % spec.tracer) === 0;
+  mg.tracers++;
+
+  SHELLS.push({
+    p: [mz[0], mz[1], mz[2]],
+    prev: [mz[0], mz[1], mz[2]],
+    v: [d[0]*spec.v0, d[1]*spec.v0, d[2]*spec.v0],
+    life: 3.0,
+    alive: true,
+    mg: true,
+    tracer: tr,
+    dmg: spec.dmg,
+    g: 9.81,
+  });
+
+  /* 枪口焰：小、短 */
+  FLASHES.push({
+    p: [mz[0], mz[1], mz[2]], dir: d, life: 0.035, maxLife: 0.035,
+    size: rr(0.13, 0.20), seed: Math.random(), kind: 1,
+    col: [3.0, 1.7, 0.75, 1.0],
+  });
+  if(tr){
+    LIGHTS.push({ p:[mz[0],mz[1],mz[2]], col:[1.0,0.6,0.25], intensity:2.0,
+                  life:0.05, maxLife:0.05 });
+    if(Math.random() < 0.14){
+      SMOKES.push({
+        p: [mz[0]+d[0]*0.18, mz[1]+d[1]*0.18+0.03, mz[2]+d[2]*0.18],
+        v: [d[0]*rr(0.5,1.2)+rr(-0.2,0.2), rr(0.1,0.4), d[2]*rr(0.5,1.2)+rr(-0.2,0.2)],
+        life: rr(0.22,0.40), maxLife: 0.40, size: rr(0.10,0.18), seed: Math.random(),
+      });
+    }
+  }
+
+  mg.heat = Math.min(1, mg.heat + spec.heat);
+  if(mg.heat >= 1){
+    mg.locked = true;
+    mg.flash = 1;
+    sndEmpty();
+  }
+
+  sndMG(mz, false, MG.cal);
+
+  /* 联机：按 ~8 Hz 同步「枪口 + 方向」，远端自己补弹道和声音 */
+  if(NET.on && NET.started && (mg.netT === 0 || t - mg.netT >= 0.12)){
+    mg.netT = t;
+    netOnMG(true, mz, d, MG.cal);
+  }
+}
+
+function mgUpdate(t, dt){
+  if(mg.flash > 0) mg.flash = Math.max(0, mg.flash - dt * 1.8);
+  if(!MG) return;
+
+  /* 过热 / 冷却 */
+  if(mg.heat > 0){
+    mg.heat = Math.max(0, mg.heat - MG.spec.cool * dt);
+    if(mg.locked && mg.heat <= 0.35) mg.locked = false;
+  }
+
+  /* 追瞄 */
+  const dy = wrapPi(mg.wantYaw - mg.yaw);
+  mg.yaw = clamp(mg.yaw + clamp(dy, -MG_RATE*dt, MG_RATE*dt), MG.yawMin, MG.yawMax);
+  const pT = clamp(mg.wantPitch, MG.pitchMin, MG.pitchMax);
+  mg.pitch = clamp(mg.pitch + clamp(pT - mg.pitch, -MG_PITCH_RATE*dt, MG_PITCH_RATE*dt),
+                   MG.pitchMin, MG.pitchMax);
+
+  /* 扳机 */
+  const want = !!input.mg && STARTED && !NET.self.dead && !Q.has('nofire')
+               && !mg.locked && mg.heat < 1;
+
+  if(want && t >= mg.next){
+    mgFire(t);
+    mg.next = t + 60 / MG.spec.rpm;
+  }
+  if(!want) mg.netT = 0;
+
+  if(want !== mg.fire){
+    mg.fire = want;
+    netOnMG(want, null, null, MG.cal);
+  }
+
+  /* 联机伤害：每 0.3 s 汇总给房主，避免每发一条消息 */
+  if(mg.hits.size && t >= mg.hitT){
+    mg.hitT = t + 0.3;
+    for(const [slot, dmg] of mg.hits){
+      const d = Math.round(dmg);
+      if(d >= 1) netAfterHit(slot, Math.min(60, d));
+    }
+    mg.hits.clear();
+  }
+}
+
+/* 机枪打地面：比主炮轻得多，避免连射时满地爆炸 */
+function mgGroundImpact(p){
+  if(Math.random() < 0.45)
+    spawnDust(p[0], 0.10, p[2], rr(-0.35,0.35), rr(0.25,0.75), rr(-0.35,0.35), rr(0.45,0.95));
+  if(Math.random() < 0.3) spawnSparks([p[0], 0.12, p[2]], 2, 0.45);
+  if(Math.random() < 0.16) sndGroundHit(p);
+}
+
 /* ---------------- 主更新 ---------------- */
 function updateCombat(t, dt){
   // 换弹
@@ -3597,22 +3799,29 @@ function updateCombat(t, dt){
     if(weapon.ammo <= 0){ weapon.reloading = WPN.reload; sndReload(); }
   }
 
+  // 车顶机枪（独立于主炮扳机）
+  mgUpdate(t, dt);
+
   // 炮弹
   for(let i = SHELLS.length - 1; i >= 0; i--){
     const s = SHELLS[i];
     s.prev[0] = s.p[0]; s.prev[1] = s.p[1]; s.prev[2] = s.p[2];
     stepShell(s, dt, t);
 
+    const trLife = s.mg ? 0.055 : 0.09;
     if(!s.alive){
       // 最后一段也留在拖尾里
-      pushTracer(s.prev, s.p, 0.09);
+      if(s.tracer !== false) pushTracer(s.prev, s.p, trLife);
       SHELLS.splice(i, 1);
       continue;
     }
-    pushTracer(s.prev, s.p, 0.09);
+    if(s.tracer !== false) pushTracer(s.prev, s.p, trLife);
     s.life -= dt;
     if(s.life <= 0) SHELLS.splice(i, 1);
   }
+
+  // 远端玩家的车顶机枪补弹道 + 声音
+  netUpdateMG(t, dt);
 
   // 火花
   for(let i = SPARKS.length - 1; i >= 0; i--){
@@ -3698,9 +3907,10 @@ function buildFX(){
           [3.0, 1.80, 0.80, 1.00*k]);
   }
 
-  // 炮弹头部亮光
+  // 炮弹头部亮光（机枪只给曳光弹画）
   for(const s of SHELLS){
-    fxDot(s.p, 0.12, [3.5, 2.0, 0.9, 0.85]);
+    if(s.tracer === false) continue;
+    fxDot(s.p, s.mg ? 0.055 : 0.12, [3.5, 2.0, 0.9, 0.85]);
   }
 
   // 星芒 / 光晕 / 火球
@@ -3996,6 +4206,43 @@ function sndPing(p, vol, pitch){
   ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
   n.connect(bp); bp.connect(ng); ng.connect(out);
   n.start(t); n.stop(t + 0.12);
+}
+
+/* 车顶机枪：短促的「哒」，限频避免连射时叠成一团 */
+let _mgSndT = 0;
+function sndMG(p, own, cal){
+  if(!AUDIO.ok) return;
+  const ctx = AUDIO.ctx, t = ctx.currentTime;
+  if(t - _mgSndT < 0.045) return;
+  _mgSndT = t;
+  const heavy = (cal === '12.7' || cal === '14.5');
+  const out = audioBus(p, own ? 0.32 : 0.24, 0.20);
+
+  const n = ctx.createBufferSource();
+  n.buffer = AUDIO.noise;
+  n.playbackRate.value = (heavy ? 1.05 : 1.45) + Math.random() * 0.25;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = heavy ? 1500 : 2300;
+  bp.Q.value = 0.8;
+  const ng = ctx.createGain();
+  const dur = heavy ? 0.075 : 0.055;
+  ng.gain.setValueAtTime(0.0001, t);
+  ng.gain.exponentialRampToValueAtTime(heavy ? 0.75 : 0.55, t + 0.002);
+  ng.gain.exponentialRampToValueAtTime(0.0012, t + dur);
+  n.connect(bp); bp.connect(ng); ng.connect(out);
+  n.start(t); n.stop(t + dur + 0.01);
+
+  const o = ctx.createOscillator();
+  o.type = 'square';
+  o.frequency.setValueAtTime(heavy ? 190 : 260, t);
+  o.frequency.exponentialRampToValueAtTime(heavy ? 90 : 130, t + 0.04);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.exponentialRampToValueAtTime(heavy ? 0.22 : 0.14, t + 0.002);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.055);
+  o.connect(og); og.connect(out);
+  o.start(t); o.stop(t + 0.06);
 }
 
 /* 打到地面：闷响 + 沙土 */
@@ -4703,7 +4950,7 @@ const NO_LOCK   = Q.has('nolock');
 /* 触屏设备：不请求指针锁定，改用屏幕上的虚拟摇杆 / 按钮（?touch=1 可强制开启） */
 const TOUCH     = Q.has('touch') || ('ontouchstart' in window) || (matchMedia && matchMedia('(pointer:coarse)').matches);
 
-const input = { fire: false, sniper: false, locked: false };
+const input = { fire: false, sniper: false, mg: false, locked: false };
 
 /* ---- 定速巡航（E 前进 / Q 倒车，各三档，再按一次关闭） ---- */
 const CRUISE_FRAC = [0.30, 0.62, 1.00];   // 档位 → 油门比例
@@ -4774,11 +5021,13 @@ addEventListener('mouseup', e => {
 addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('keydown', e => {
   if(e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.sniper = true;
+  else if(e.code === 'Space' || e.code === 'KeyF'){ input.mg = true; e.preventDefault(); }
 });
 addEventListener('keyup', e => {
   if(e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.sniper = false;
+  else if(e.code === 'Space' || e.code === 'KeyF') input.mg = false;
 });
-addEventListener('blur', () => { input.fire = false; input.sniper = false; freeLook = false; });
+addEventListener('blur', () => { input.fire = false; input.sniper = false; input.mg = false; freeLook = false; });
 
 /* E / Q 定速巡航，C 自由视角（只在战斗里生效，车库的 Q/E 换国家不受影响） */
 addEventListener('keydown', e => {
@@ -4809,6 +5058,7 @@ let zoom = 11.0;
 
 if(Q.has('fire'))   input.fire = true;
 if(Q.has('sniper')) input.sniper = true;
+if(Q.has('mg'))     input.mg = true;
 /* 调试：?cruise=2 直接进入前进 2 档，?cruise=-1 倒车 1 档 */
 if(Q.has('cruise')){
   const cv = Math.round(+Q.get('cruise') || 0);
@@ -4877,6 +5127,7 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
   wrap.innerHTML = `
     <div id="tstick"><i id="tknob"></i></div>
     <div id="tfire" class="tbtn">开火</div>
+    <div id="tmg" class="tbtn">机枪</div>
     <div id="taim" class="tbtn">炮镜</div>
     <div id="tfree" class="tbtn">视角</div>
     <div id="tcrF" class="tbtn">巡航+</div>
@@ -4889,7 +5140,7 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
 
   const $ = s => wrap.querySelector(s);
   const stick = $('#tstick'), knob = $('#tknob');
-  const fireEl = $('#tfire'), aimEl = $('#taim'), freeEl = $('#tfree');
+  const fireEl = $('#tfire'), aimEl = $('#taim'), freeEl = $('#tfree'), mgEl = $('#tmg');
   const crFEl = $('#tcrF'), crREl = $('#tcrR'), hintEl = $('#tchint');
   const rotEl = $('#trot');
   const flipEl = $('#tflip');
@@ -5065,6 +5316,7 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
     el.addEventListener('lostpointercapture', end);
   }
   hold(fireEl, () => { input.fire = true; }, () => { input.fire = false; });
+  hold(mgEl, () => { input.mg = true; }, () => { input.mg = false; });
   hold(freeEl, () => { freeLook = true; }, () => { freeLook = false; });
 
   /* 炮镜是开关，不是按住 */
@@ -5310,6 +5562,7 @@ function updateSim(t, dt){
     mouseDX = mouseDY = 0;
     car.turret += (0 - car.turret) * Math.min(1, dt * 3);
     car.gun    += (0 - car.gun)    * Math.min(1, dt * 3);
+    if(MG){ mg.wantYaw = 0; mg.wantPitch = 0; }
   } else if(NET.self.dead){
     // 阵亡：炮塔定住，等重生
     mouseDX = mouseDY = 0;
@@ -5332,6 +5585,12 @@ function updateSim(t, dt){
     }
 
     const want = aimSolve();
+
+    /* 车顶机枪跟着准星走：相对炮塔的残余偏航 + 直接取俯仰 */
+    if(MG){
+      mg.wantYaw = wrapPi(want.yaw - car.yaw - car.turret);
+      mg.wantPitch = clamp(want.pitch, MG.pitchMin, MG.pitchMax);
+    }
 
     // 炮塔：取最短角，减速带内按误差比例收尾
     const e = wrapPi(want.yaw - car.yaw - car.turret);
@@ -5604,23 +5863,31 @@ function clearAttribs(){
 }
 
 /* 每帧的载具矩阵 */
-let vehM, turretM, gunM;
+let vehM, turretM, gunM, mgM;
 
-/* 任意一辆车的矩阵（本地车 / 远端玩家共用） */
-function entityMats(pos, yaw, pitch, roll, turret, gun, tp, pg){
+/* 任意一辆车的矩阵（本地车 / 远端玩家共用）
+   mp/my/mpi = 车顶机枪转轴（炮塔坐标系）+ 相对偏航 / 俯仰；不给就锁在炮塔上 */
+function entityMats(pos, yaw, pitch, roll, turret, gun, tp, pg, mp, my, mpi){
   const vm = M4.mul(M4.mul(M4.translate(pos[0], pos[1], pos[2]), M4.rotY(yaw)),
                     M4.mul(M4.rotX(pitch || 0), M4.rotZ(roll || 0)));
   const tm = M4.mul(M4.mul(vm, M4.mul(M4.translate(tp[0],tp[1],tp[2]), M4.rotY(turret))),
                     M4.translate(-tp[0],-tp[1],-tp[2]));
   const gm = M4.mul(M4.mul(tm, M4.mul(M4.translate(pg[0],pg[1],pg[2]), M4.rotX(-gun))),
                     M4.translate(-pg[0],-pg[1],-pg[2]));
-  return { vehM: vm, turretM: tm, gunM: gm };
+  let mm = tm;
+  if(mp){
+    mm = M4.mul(M4.mul(M4.mul(M4.mul(tm,
+           M4.translate(mp[0],mp[1],mp[2])), M4.rotY(my || 0)),
+           M4.rotX(-(mpi || 0))), M4.translate(-mp[0],-mp[1],-mp[2]));
+  }
+  return { vehM: vm, turretM: tm, gunM: gm, mgM: mm };
 }
 
 function buildMatrices(){
   const m = entityMats(car.pos, car.yaw, car.pitch, car.roll,
-                       car.turret, car.gun, PIVOT_TURRET, PIVOT_GUN);
-  vehM = m.vehM; turretM = m.turretM; gunM = m.gunM;
+                       car.turret, car.gun, PIVOT_TURRET, PIVOT_GUN,
+                       PIVOT_MG, MG ? mg.yaw : 0, MG ? mg.pitch : 0);
+  vehM = m.vehM; turretM = m.turretM; gunM = m.gunM; mgM = m.mgM;
 }
 
 function wheelMatrix(c, ang){
@@ -5655,6 +5922,10 @@ const miniCtx     = (elMini && elMini.getContext) ? elMini.getContext('2d') : nu
 const elReload    = document.querySelector('#reloadbar u');
 const elAmmoMeta  = document.querySelector('#ammometa span');
 const ammoBox     = document.getElementById('ammobox');
+const elMGRow     = document.getElementById('mgrow');
+const elMGCal     = document.getElementById('mgcal');
+const elMGHeat    = document.querySelector('#mgheat u');
+const elTmgBtn    = document.getElementById('tmg');
 if(BENCH) benchEl.style.display = 'block';
 
 /* ---- 顶部罗盘：先铺一条 -180°..540° 的刻度带，按相机朝向平移 ---- */
@@ -5813,7 +6084,7 @@ function useTrackProgram(pr){
 function drawVehicle(pr, trackPr){
   if(NET.self.dead) return;            // 阵亡：车已经炸了，等重生再画
   if(USE_MODEL){
-    const mats = { vehM, turretM, gunM };
+    const mats = { vehM, turretM, gunM, mgM };
     if(pr === pDepth) drawModelDepth(MODEL, mats, car.travelL, car.travelR);
     else              drawModelScene(MODEL, mats, car.travelL, car.travelR, TRACK_DIR);
     return;
@@ -6508,6 +6779,18 @@ function updateHUD(now){
       : (WPN.short || '') + ' · 待发';
   }
   if(ammoBox) ammoBox.classList.toggle('reloading', weapon.reloading > 0);
+
+  // 车顶机枪：口径 + 过热条（没有机枪的车整行隐藏）
+  if(elMGRow){
+    elMGRow.hidden = !MG;
+    if(MG){
+      if(elMGCal)  elMGCal.textContent = 'MG ' + MG.cal;
+      if(elMGHeat) elMGHeat.style.width = Math.round(mg.heat * 100) + '%';
+      elMGRow.classList.toggle('warn', mg.heat > 0.72 && !mg.locked);
+      elMGRow.classList.toggle('hot', mg.locked || mg.flash > 0.05);
+    }
+  }
+  if(elTmgBtn) elTmgBtn.style.display = MG ? '' : 'none';
   if(hudKill) hudKill.textContent = String(kills);
 
   // 联机：自己的装甲 / 得分 / 受伤红框 / 阵亡倒计时
@@ -6896,6 +7179,9 @@ async function applyVehicle(id){
     loadState = 'empty';
   }
 
+  /* 车顶机枪：模型里烘焙出独立 mg 组才有；否则清空（HUD 会隐藏） */
+  mgApply(V, USE_MODEL && loadState === 'ready' ? MODEL.meta : null);
+
   if(my !== selToken) return;
   buildMatrices();
   updateGarageLoad();
@@ -7186,6 +7472,75 @@ function netGhostShell(mz, dir){
     });
   }
   LIGHTS.push({ p: [mz[0], mz[1], mz[2]], col: [1.0, 0.55, 0.22], intensity: 5.0, life: 0.09, maxLife: 0.09 });
+}
+
+/* ---------------- 车顶机枪同步 ---------------- */
+/*  本机开火时按 ~8 Hz 把「枪口 + 方向 + 口径」发给其他人；
+    远端只做视觉：按射速自己补弹道和声音，不结算伤害。             */
+const MG_STREAMS = new Map();        // slot -> {on, mz, dir, cal, next, n}
+
+function netOnMG(on, mz, dir, cal){
+  if(!NET.on || !NET.started) return;
+  const msg = { t: 'mgfx', slot: NET.slot, on: !!on, cal: cal || '7.62' };
+  if(on && mz && dir){
+    msg.mz  = [mz[0], mz[1], mz[2]];
+    msg.dir = [dir[0], dir[1], dir[2]];
+  }
+  if(NET.role === 'host'){
+    netBroadcast(msg);
+  } else if(NET.hostConn && NET.hostConn.open){
+    msg.t = 'mg';
+    try{ NET.hostConn.send(msg); }catch(e){}
+  }
+}
+
+function netOnMGMsg(d){
+  const slot = d.slot | 0;
+  if(!slot || slot === NET.slot) return;
+  let st = MG_STREAMS.get(slot);
+  if(!st){
+    st = { on: false, mz: [0,0,0], dir: [0,0,1], cal: '7.62', next: 0, n: 0 };
+    MG_STREAMS.set(slot, st);
+  }
+  if(d.cal) st.cal = d.cal;
+  const mz = netVec3(d.mz), dir = netVec3(d.dir);
+  if(mz)  st.mz = mz;
+  if(dir) st.dir = dir;
+  st.on = !!d.on;
+  if(!st.on) st.next = 0;
+}
+
+/* 由 updateCombat 每帧调用：给远处的机枪补曳光弹 + 声音 */
+function netUpdateMG(t, dt){
+  if(!NET.on || !MG_STREAMS.size) return;
+  for(const st of MG_STREAMS.values()){
+    if(!st.on) continue;
+    const spec = MG_CAL[st.cal] || MG_CAL['7.62'];
+    if(!st.next || t - st.next > 0.6) st.next = t;
+    let guard = 0;
+    while(t >= st.next && guard++ < 4){
+      const sp = spec.spread * 2.2;
+      const d = norm3([
+        st.dir[0] + (Math.random()-0.5)*2*sp,
+        st.dir[1] + (Math.random()-0.5)*2*sp,
+        st.dir[2] + (Math.random()-0.5)*2*sp,
+      ]);
+      SHELLS.push({
+        p: [st.mz[0], st.mz[1], st.mz[2]],
+        prev: [st.mz[0], st.mz[1], st.mz[2]],
+        v: [d[0]*spec.v0, d[1]*spec.v0, d[2]*spec.v0],
+        life: 3.0,
+        alive: true,
+        ghost: true,
+        mg: true,
+        tracer: true,
+        dmg: 0,
+        g: 9.81,
+      });
+      if((st.n++ % 3) === 0) sndMG(st.mz, false, st.cal);
+      st.next += 60 / spec.rpm;
+    }
+  }
 }
 
 /* ---------------------------------------------------------------- 大厅 / 面板 */
@@ -7593,6 +7948,18 @@ function netHostData(conn, d){
     return;
   }
 
+  if(d && d.t === 'mg'){
+    const p = NET.clients.get(conn.peer);
+    if(!p) return;
+    const msg = { t: 'mgfx', slot: p.slot, on: !!d.on, cal: d.cal || '7.62' };
+    const mz = netVec3(d.mz), dir = netVec3(d.dir);
+    if(mz)  msg.mz = mz;
+    if(dir) msg.dir = dir;
+    netBroadcast(msg, conn.peer);
+    netOnMGMsg(msg);
+    return;
+  }
+
   if(d && d.t === 'respawn'){
     const p = NET.clients.get(conn.peer);
     if(!p || !p.dead) return;
@@ -7964,6 +8331,10 @@ function netClientData(peer, d){
     if(mz && dir) netGhostShell(mz, dir);
     return;
   }
+  if(d && d.t === 'mgfx'){
+    netOnMGMsg(d);
+    return;
+  }
   if(d && d.t === 'spawn'){
     const e = REMOTES.get(d.slot | 0);
     if(e){ e.buf.length = 0; e.rt = 0; }
@@ -7990,7 +8361,7 @@ function netStartSending(){
 function netSendState(){
   if(!NET.on || !NET.started) return;
 
-  const b = new ArrayBuffer(40);
+  const b = new ArrayBuffer(48);
   const dv = new DataView(b);
   dv.setUint8(0, 1);
   dv.setUint8(1, NET.slot);
@@ -8003,6 +8374,8 @@ function netSendState(){
   dv.setFloat32(26, car.gun, true);
   dv.setFloat32(30, car.travelL, true);
   dv.setFloat32(34, car.travelR, true);
+  dv.setFloat32(40, MG ? mg.yaw   : 0, true);
+  dv.setFloat32(44, MG ? mg.pitch : 0, true);
   dv.setUint8(38, 1);
   dv.setUint8(39, 1);
 
@@ -8015,12 +8388,18 @@ function netSendState(){
 }
 
 function netDecode(dv, slot){
-  return {
+  const s = {
     slot: slot,
     x: dv.getFloat32(6, true), y: dv.getFloat32(10, true), z: dv.getFloat32(14, true),
     yaw: dv.getFloat32(18, true), turret: dv.getFloat32(22, true), gun: dv.getFloat32(26, true),
     travelL: dv.getFloat32(30, true), travelR: dv.getFloat32(34, true),
+    mgYaw: 0, mgPitch: 0,
   };
+  if(dv.byteLength >= 48){
+    s.mgYaw   = dv.getFloat32(40, true);
+    s.mgPitch = dv.getFloat32(44, true);
+  }
+  return s;
 }
 
 function netOnPacket(b){
@@ -8066,6 +8445,7 @@ function netApplySnap(s){
     x: s.x, y: s.y, z: s.z,
     yaw: s.yaw, turret: s.turret, gun: s.gun,
     travelL: s.travelL, travelR: s.travelR,
+    mgYaw: s.mgYaw || 0, mgPitch: s.mgPitch || 0,
   });
 
   netEnsureModel(e);
@@ -8136,7 +8516,8 @@ function netSample(e, rt){
   }
   if(a === c || c.rt <= a.rt){
     return { x: a.x, y: a.y, z: a.z, yaw: a.yaw, turret: a.turret, gun: a.gun,
-             travelL: a.travelL, travelR: a.travelR };
+             travelL: a.travelL, travelR: a.travelR,
+             mgYaw: a.mgYaw || 0, mgPitch: a.mgPitch || 0 };
   }
   const u = Math.min(1, Math.max(0, (rt - a.rt) / (c.rt - a.rt)));
   return {
@@ -8148,6 +8529,8 @@ function netSample(e, rt){
     gun: a.gun + (c.gun - a.gun) * u,
     travelL: a.travelL + (c.travelL - a.travelL) * u,
     travelR: a.travelR + (c.travelR - a.travelR) * u,
+    mgYaw: lerpAng(a.mgYaw || 0, c.mgYaw || 0, u),
+    mgPitch: (a.mgPitch || 0) + ((c.mgPitch || 0) - (a.mgPitch || 0)) * u,
   };
 }
 
@@ -8169,8 +8552,10 @@ function drawRemotes(pr, trackPr){
     const meta = P.meta;
     const pt = (meta && meta.pivotTurret) || [0, 1.4, 0];
     const pg = (meta && meta.pivotGun)    || [0, 1.9, 0.8];
+    const mp = meta && meta.mgPivot;
     const V = VEHICLES[e.veh] || {};
-    const mats = entityMats([s.x, s.y, s.z], s.yaw, 0, 0, s.turret, s.gun, pt, pg);
+    const mats = entityMats([s.x, s.y, s.z], s.yaw, 0, 0, s.turret, s.gun, pt, pg,
+                            mp, s.mgYaw || 0, s.mgPitch || 0);
 
     if(pr === pDepth) drawModelDepth(P, mats, s.travelL, s.travelR);
     else              drawModelScene(P, mats, s.travelL, s.travelR, V.trackDir || 1);
