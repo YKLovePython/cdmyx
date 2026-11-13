@@ -6530,7 +6530,7 @@ const PHYS = {
   id: '', meta: null,
   mass: 19000, comH: 1.0, comZ: 0, halfW: 1.15,
   rEff: 0.3, anchorY: 0.3, Iyaw: 90000,
-  yawVis: 0,                        // 控制层输出的 yaw 角速度（rad/s）
+  trackV: 0, steerSpd: 0,            // 履带目标线速度 / 左右差速（视觉用）
   contacts: [],                    // { lx, lz, side }
   accum: 0,
   prev: { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 },
@@ -6731,7 +6731,7 @@ function physSetupVehicle(){
   PHYS.veh = veh;
   PHYS.ready = true;
   PHYS.accum = 0;
-  PHYS.yawVis = 0;
+  PHYS.trackV = PHYS.steerSpd = 0;
 
   console.log(`  物理：${PHYS.id || '?'}  ${(PHYS.mass / 1000).toFixed(1)} t  ` +
               `Rapier 悬挂 ${N} 点  r=${PHYS.rEff.toFixed(2)} m  ` +
@@ -6790,10 +6790,11 @@ function physSync(alpha){
   car.roll  = Math.asin(pc(rgt[1] / Math.max(0.05, Math.cos(car.pitch)), -1, 1));
 
   const v = b.linvel(_v);
+  const av = b.angvel(_av);
   const vF = v.x * fwd[0] + v.y * fwd[1] + v.z * fwd[2];
   car.v = vF;
-  car.yawRate = PHYS.yawVis;
-  const half = PHYS.yawVis * PHYS.halfW;
+  car.yawRate = av.y;
+  const half = av.y * PHYS.halfW;
   car.vL = vF - half;
   car.vR = vF + half;
   car.prevV = vF;
@@ -6829,7 +6830,7 @@ function physReset(){
   }
   PHYS.accum = 0;
   PHYS.travelL = PHYS.travelR = 0;
-  PHYS.yawVis = 0;
+  PHYS.trackV = PHYS.steerSpd = 0;
   physSnapPrev();
   physSync(1);
 }
@@ -6859,7 +6860,7 @@ function physHalt(){
       PHYS.veh.setWheelSteering(i, 0);
     }
   }
-  PHYS.yawVis = 0;
+  PHYS.trackV = PHYS.steerSpd = 0;
   physSnapPrev();
   physSync(1);
 }
@@ -6884,69 +6885,30 @@ function physDrive(dt, thr, str){
   let drive = (vT - vF) * PHYS.mass * 1.5;
   drive = pc(drive, -PHYS.mass * 4.0, PHYS.mass * 4.0);
 
-  /* 履带差速：左侧推力 +，右侧推力 -，str > 0 向左（A） */
   const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
-  const steer = str * PHYS.mass * 0.8 * (1 - 0.35 * spdK);
+  const idle = Math.abs(thr) < 0.06;
+
+  /* ---- 履带差速 ----
+     参考常见坦克控制器（brihernandez/PhysicsTankExample 的左右履带马达、
+     RuanLucasGD/Simple-Militay-Tank-Physics 的轮位侧向力）：
+     左右履带给不同的推力，车体靠地面摩擦/履带滑移自己转起来。
+     这里不直接改车体朝向。 */
+  const steerF = str * PHYS.mass * 4.5 * (1 - 0.65 * spdK);   // 每侧额外推力（N）
+  PHYS.trackV += (vT - PHYS.trackV) * Math.min(1, dt * 7.0);  // 履带目标速度（视觉/音效）
+  PHYS.steerSpd = str * (V.turnRate || 2.2) * PHYS.halfW * (1 - 0.35 * spdK);
 
   const N = PHYS.contacts.length || 1;
-  const idle = Math.abs(thr) < 0.06;
+  const sideN = Math.max(1, N / 2);
   const brake = idle ? PHYS.mass * 6.0 * dt / N : 0;
 
   for(let i = 0; i < N; i++){
     const c = PHYS.contacts[i];
     let f = drive / N;
-    f += (c.lx < 0 ? steer : -steer) / N;
+    /* 模型 -X（屏幕右侧）加推力、+X（屏幕左侧）减推力：str>0 向左转 */
+    f += (c.lx < 0 ? steerF : -steerF) / sideN;
     PHYS.veh.setWheelEngineForce(i, f);
     PHYS.veh.setWheelBrake(i, brake);
     PHYS.veh.setWheelSteering(i, 0);
-  }
-}
-
-/* ---------------------------------------------------------------- 偏航速率控制 */
-/*  Rapier 的履带侧向摩擦会把“原地转向”锁得很死（每侧 6 个接地点一起
-    抵抗偏航，光靠差速推力基本转不动）。这里在物理步之后直接把车体
-    绕自身 up 轴的角速度拉向目标值：
-      · 原地约 80°/s，高速约 28°/s（随速度收窄，防止甩翻）
-      · 松手后用较慢的衰减回 0，保留一点惯性
-    只改 yaw 角速度，pitch/roll/悬挂/重力仍然全由 Rapier 算。 */
-function physYawAssist(dt, str){
-  const b = PHYS.body;
-  if(!b || !PHYS.veh) return;
-
-  const V = (typeof VEH !== 'undefined' && VEH) ? VEH : (VEHICLES && VEHICLES.bmpt) || {};
-  const q = b.rotation(_q);
-  const m = quatMat(q.x, q.y, q.z, q.w, _m3);
-  const fwd = [m[0][2], m[1][2], m[2][2]];
-  const v = b.linvel(_v);
-  const vF = v.x * fwd[0] + v.y * fwd[1] + v.z * fwd[2];
-  const maxS = V.maxSpeed || 15.5;
-  const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
-
-  const target = str * (V.turnRate || 2.2) * 0.75 * (1 - 0.60 * spdK);
-  const blend = Math.abs(str) > 0.02 ? 1.0 : 0.22;
-  let rate = PHYS.yawVis + (target - PHYS.yawVis) * blend;
-  const maxDelta = 18 * dt;
-  rate = pc(rate, PHYS.yawVis - maxDelta, PHYS.yawVis + maxDelta);
-  PHYS.yawVis = rate;
-
-  /* 直接绕世界 Y 轴转车体：这是控制层，不依赖履带摩擦能不能推得动。
-     Rapier 的侧向摩擦对履带原地转向的阻力太大，纯力矩/角速度都会被吃掉。 */
-  const ang = rate * dt;
-  if(Math.abs(ang) > 1e-7){
-    const s = Math.sin(ang * 0.5), c = Math.cos(ang * 0.5);
-    const nx = c * q.x + s * q.z;
-    const ny = c * q.y + s * q.w;
-    const nz = c * q.z - s * q.x;
-    const nw = c * q.w - s * q.y;
-    const nl = Math.hypot(nx, ny, nz, nw) || 1;
-    b.setRotation({ x: nx / nl, y: ny / nl, z: nz / nl, w: nw / nl }, true);
-  }
-
-  /* 把物理引擎里的 yaw 角速度清零，避免下一步再叠一次；
-     pitch/roll 角速度保留，悬挂和翻滚还是 Rapier 算。 */
-  const av = b.angvel(_av);
-  if(Math.abs(av.y) > 1e-6){
-    b.setAngvel({ x: av.x, y: 0, z: av.z }, true);
   }
 }
 
@@ -6976,7 +6938,6 @@ function physStep(dt, thr, str){
     physDrive(PHYS_DT, thr, str);
     PHYS.veh.updateVehicle(PHYS_DT, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC);
     PHYS.world.step();
-    physYawAssist(PHYS_DT, str);
     PHYS.accum -= PHYS_DT;
     steps++;
   }
@@ -6984,9 +6945,10 @@ function physStep(dt, thr, str){
 
   physSync(PHYS.accum / PHYS_DT);
 
-  /* 履带视觉行程：按左右履带线速度积分（原地转向时两侧反向） */
-  PHYS.travelL += car.vL * dt;
-  PHYS.travelR += car.vR * dt;
+  /* 履带视觉行程：按左右履带的目标线速度积分。
+     原地转向时两侧反向；履带先动，车体靠差速推力/地面摩擦跟着转。 */
+  PHYS.travelL += (PHYS.trackV - PHYS.steerSpd) * dt;
+  PHYS.travelR += (PHYS.trackV + PHYS.steerSpd) * dt;
   car.travelL = PHYS.travelL;
   car.travelR = PHYS.travelR;
 }
