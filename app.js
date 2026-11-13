@@ -3142,6 +3142,7 @@ const TRACER_CAP = 320;
 const SMOKES = [];    // 炮口烟 / 爆炸烟
 const CASINGS = [];   // 抛壳
 const LIGHTS = [];    // 动态点光（炮口焰 / 爆炸）
+const RINGS = [];     // 地面冲击波环（击毁用）
 const LIGHT_MAX = 4;
 
 /* 弹壳网格：30mm 铜壳（约 13mm 半径 × 150mm 长） */
@@ -3202,6 +3203,11 @@ void main(){
     float rays = pow(max(cos(ang * 5.0), 0.0), 12.0) * smoothstep(1.0, 0.05, r);
     float rays2 = pow(max(cos(ang * 3.0 + 1.3), 0.0), 20.0) * smoothstep(0.9, 0.10, r);
     mask = clamp(core * 1.35 + rays * 0.9 + rays2 * 0.7, 0.0, 1.6);
+  } else if(vPrm.x > 2.5){
+    /* 地面冲击波：一圈带噪声的环，贴地展开 */
+    float ring = smoothstep(0.52, 0.90, r) * smoothstep(1.0, 0.90, r);
+    float n = hash12(c * 5.7 + vPrm.y * 17.0);
+    mask = ring * (0.65 + 0.55 * n);
   } else {
     /* 烟：软点 + 内部噪声，边缘破碎 */
     float d = max(1.0 - r, 0.0);
@@ -3244,6 +3250,29 @@ function fxQuad(center, size, col, kind, seed, aspect){
     data[o+9] = kind; data[o+10] = seed;
   }
   if(smoke) fxsN += 6; else fxqN += 6;
+}
+
+/* 贴地的四边形：冲击波环（kind 3） */
+function fxRing(center, radius, col, seed){
+  if(radius <= 0.02) return;
+  if(fxqN + 6 > FXQ_MAX * 6) return;
+  const corners = [[-1,-1],[1,-1],[1,1],[-1,-1],[1,1],[-1,1]];
+  for(let i=0;i<6;i++){
+    const u = corners[i][0], v = corners[i][1];
+    const o = (fxqN + i) * 11;
+    fxqData[o]   = center[0] + u * radius;
+    fxqData[o+1] = center[1];
+    fxqData[o+2] = center[2] + v * radius;
+    fxqData[o+3] = u; fxqData[o+4] = v;
+    fxqData[o+5] = col[0]; fxqData[o+6] = col[1]; fxqData[o+7] = col[2]; fxqData[o+8] = col[3];
+    fxqData[o+9] = 3; fxqData[o+10] = seed;
+  }
+  fxqN += 6;
+}
+
+/* 爆炸冲击波：从 r0 扩到 r1，寿命 life 秒 */
+function groundRing(p, r0, r1, life, col){
+  RINGS.push({ p: [p[0], 0.06, p[2]], r0, r1, life, maxLife: life, seed: Math.random(), col });
 }
 
 function fxVert(x,y,z, c){
@@ -3360,6 +3389,10 @@ function fireShot(t){
   LIGHTS.push({ p: [mz[0], mz[1], mz[2]], col: [1.0, 0.55, 0.22], intensity: 5.0, life: 0.09, maxLife: 0.09 });
   weapon.firedAt = t;
 
+  /* 声音 + 一点点后坐震屏 */
+  sndShot(mz, true);
+  addShake(0.10);
+
   /* 联机：告诉其他玩家「我在哪、朝哪开火」，他们那边放炮口焰和视觉弹道 */
   netOnShot(mz, d);
 }
@@ -3383,10 +3416,12 @@ function damageTarget(tg, dmg, ip, t){
   tg.lastHit = t;
   hitFlash = 1.0;
   spawnSparks(ip, 7, 1.0);
+  sndPing(ip, 0.42, 1.0);
   if(tg.hp <= 0 && tg.state === 'up'){
     tg.state = 'falling';
     tg.tilt = Math.max(tg.tilt, 0.015);
     kills++;
+    sndPing(ip, 0.62, 0.72);
     FEED.unshift({ txt: '击毁  靶标 ' + (TARGETS.indexOf(tg)+1), t: 0 });
     if(FEED.length > 4) FEED.pop();
   }
@@ -3400,39 +3435,56 @@ function groundImpact(p){
   SMOKES.push({ p:[p[0], 0.25, p[2]], v:[rr(-0.5,0.5), rr(0.5,1.2), rr(-0.5,0.5)],
                 life:0.5, maxLife:0.5, size:0.35, seed:Math.random() });
   LIGHTS.push({ p:[p[0], 0.5, p[2]], col:[1.0,0.6,0.3], intensity:1.6, life:0.10, maxLife:0.10 });
+  sndGroundHit(p);
 }
 
-/* 阵亡爆炸：火球 + 火花 + 烟团 + 扬尘 + 动态光（纯视觉，不掉血） */
+/* 阵亡爆炸：冲击波 + 白热火球 + 火花 + 烟团 + 扬尘 + 动态光 + 燃烧残骸 */
 function netBlowUp(p){
-  /* 火球：星芒 + 外层软光 */
-  FLASHES.push({ p:[p[0], 1.5, p[2]], life:0.26, maxLife:0.26, size:2.6,
+  /* 地面冲击波：快的一层暗、慢的一层向外扩 */
+  groundRing(p, 0.8, 16.0, 0.62, [1.9, 0.92, 0.40, 0.85]);
+  groundRing(p, 0.4, 7.0, 0.34, [2.8, 1.7, 0.95, 0.95]);
+
+  /* 火球：白热核心 → 橙红 → 大范围软光 */
+  FLASHES.push({ p:[p[0], 1.7, p[2]], life:0.10, maxLife:0.10, size:1.7,
+                 seed:Math.random(), kind:1, col:[7.0, 4.8, 2.6, 1.0] });
+  FLASHES.push({ p:[p[0], 1.5, p[2]], life:0.26, maxLife:0.26, size:2.8,
                  seed:Math.random(), kind:1, col:[5.5, 2.6, 0.95, 1.0] });
-  FLASHES.push({ p:[p[0], 1.5, p[2]], life:0.55, maxLife:0.55, size:4.5,
-                 seed:Math.random(), kind:0, col:[1.7, 0.62, 0.20, 0.65] });
+  FLASHES.push({ p:[p[0], 1.5, p[2]], life:0.60, maxLife:0.60, size:5.4,
+                 seed:Math.random(), kind:0, col:[1.8, 0.66, 0.22, 0.62] });
+
   /* 火花 */
-  for(let i=0;i<34;i++){
+  for(let i=0;i<56;i++){
     if(SPARKS.length >= 420) break;
     SPARKS.push({
-      p: [p[0]+rr(-0.7,0.7), 1.0+rr(-0.2,0.7), p[2]+rr(-0.7,0.7)],
-      v: [rr(-1,1)*9.5, rr(-0.2,1)*11.5, rr(-1,1)*9.5],
-      life: rr(0.30,0.95), size: rr(0.06,0.22), hot: 1.0,
+      p: [p[0]+rr(-0.7,0.7), 1.0+rr(-0.2,0.8), p[2]+rr(-0.7,0.7)],
+      v: [rr(-1,1)*13.0, rr(-0.1,1)*14.0, rr(-1,1)*13.0],
+      life: rr(0.30,1.10), size: rr(0.05,0.20), hot: 1.0,
     });
   }
-  /* 烟团 */
-  for(let i=0;i<12;i++){
+  /* 烟团：冲起来之后挂在上面 */
+  for(let i=0;i<18;i++){
     SMOKES.push({
-      p: [p[0]+rr(-1.0,1.0), 0.8+rr(0,1.8), p[2]+rr(-1.0,1.0)],
-      v: [rr(-1.8,1.8), rr(1.2,3.4), rr(-1.8,1.8)],
-      life: rr(1.2,2.2), maxLife: 2.2, size: rr(1.2,2.4), seed: Math.random(),
+      p: [p[0]+rr(-1.0,1.0), 0.9+rr(0,2.0), p[2]+rr(-1.0,1.0)],
+      v: [rr(-2.2,2.2), rr(1.6,4.2), rr(-2.2,2.2)],
+      life: rr(1.4,2.6), maxLife: 2.6, size: rr(1.1,2.2), seed: Math.random(),
     });
   }
-  /* 地面扬尘 */
-  for(let i=0;i<16;i++){
-    spawnDust(p[0]+rr(-1.6,1.6), 0.3+rr(0,1.6), p[2]+rr(-1.6,1.6),
-              rr(-2.2,2.2), rr(1.2,4.2), rr(-2.2,2.2), rr(1.8,3.8));
+  /* 地面扬尘：一圈往外推 */
+  for(let i=0;i<22;i++){
+    const a = Math.random()*6.283, sp = rr(1.0, 4.5);
+    spawnDust(p[0]+rr(-1.2,1.2), 0.25+rr(0,1.2), p[2]+rr(-1.2,1.2),
+              Math.cos(a)*sp, rr(1.0,3.6), Math.sin(a)*sp, rr(1.6,3.4));
   }
   /* 动态光 */
-  LIGHTS.push({ p:[p[0],1.6,p[2]], col:[1.0,0.5,0.2], intensity:9.0, life:0.45, maxLife:0.45 });
+  LIGHTS.push({ p:[p[0],1.7,p[2]], col:[1.0,0.52,0.20], intensity:11.0, life:0.50, maxLife:0.50 });
+  LIGHTS.push({ p:[p[0],1.2,p[2]], col:[1.0,0.40,0.12], intensity:6.0, life:0.90, maxLife:0.90 });
+
+  /* 燃烧残骸 + 声音 + 震屏 */
+  spawnWreck(p);
+  sndBoom(p);
+  const dx = p[0]-cam.pos[0], dy = 1.2-cam.pos[1], dz = p[2]-cam.pos[2];
+  const dist = Math.hypot(dx, dy, dz);
+  addShake(clamp(1.15 - dist / 55, 0.08, 1.0));
 }
 
 /* ---------------- 弹道推进 ---------------- */
@@ -3467,6 +3519,7 @@ function stepShell(s, dt, t){
       if(rh){
         hitFlash = 1.0;
         spawnSparks(rh.point, 8, 1.15);
+        sndPing(rh.point, 0.55, 1.25);
         netAfterHit(rh.slot, WPN.dmg);
         s.alive = false;
         return;
@@ -3532,7 +3585,7 @@ function updateCombat(t, dt){
   // 换弹
   if(weapon.reloading > 0){
     weapon.reloading -= dt;
-    if(weapon.reloading <= 0){ weapon.reloading = 0; weapon.ammo = WPN.mag; }
+    if(weapon.reloading <= 0){ weapon.reloading = 0; weapon.ammo = WPN.mag; sndClick(true); }
   }
 
   // 扳机
@@ -3541,7 +3594,7 @@ function updateCombat(t, dt){
     fireShot(t);
     weapon.ammo--;
     weapon.next = t + 60 / WPN.rpm;
-    if(weapon.ammo <= 0) weapon.reloading = WPN.reload;
+    if(weapon.ammo <= 0){ weapon.reloading = WPN.reload; sndReload(); }
   }
 
   // 炮弹
@@ -3605,6 +3658,11 @@ function updateCombat(t, dt){
     LIGHTS[i].life -= dt;
     if(LIGHTS[i].life <= 0) LIGHTS.splice(i, 1);
   }
+  // 冲击波
+  for(let i = RINGS.length - 1; i >= 0; i--){
+    RINGS[i].life -= dt;
+    if(RINGS[i].life <= 0) RINGS.splice(i, 1);
+  }
   // 曳光拖尾
   for(let i = TRACERS.length - 1; i >= 0; i--){
     TRACERS[i].life -= dt;
@@ -3652,6 +3710,13 @@ function buildFX(){
     fxQuad(f.p, f.size * grow, f.col, f.kind, f.seed, 1.0);
   }
 
+  // 冲击波环
+  for(const r of RINGS){
+    const k = clamp(r.life / r.maxLife, 0, 1);
+    const rad = r.r0 + (r.r1 - r.r0) * (1 - k);
+    fxRing(r.p, rad, [r.col[0] * k, r.col[1] * k, r.col[2] * k, r.col[3] * k * k], r.seed);
+  }
+
   // 烟
   for(const s of SMOKES){
     const k = clamp(s.life / (s.maxLife || 1.0), 0, 1);
@@ -3665,6 +3730,628 @@ function buildFX(){
     const r = Math.max(s.size, dist * 0.0011);
     fxDot(s.p, r, [2.4*k, 1.15*k, 0.40*k, k]);
   }
+}
+
+/* ===================== 57_audio.js ===================== */
+/* ============================ 程序化音效 ============================ */
+/*  没有任何音频文件：所有声音都是 WebAudio 现场合成的，首屏不增加下载量。
+      常驻：发动机（转速 → 音高/音色）、履带咔哒、风噪
+      事件：炮声、命中金属声、跳弹/落地、爆炸、换弹、受击警告
+      一次性事件按世界位置做距离衰减 + 左右声像，炮声/爆炸再送一点混响。
+      浏览器要求「用户手势」之后才允许出声，所以第一次点击/触摸时才建 AudioContext。 */
+
+const AUDIO = {
+  ctx: null, master: null, sfx: null, reverb: null, noise: null,
+  eng: null, ok: false, dead: false, muted: false,
+};
+
+try{ AUDIO.muted = localStorage.getItem('cdmyx.mute') === '1'; }catch(_){}
+
+/* ---------------- 基础缓冲 ---------------- */
+function audioNoise(ctx, sec){
+  const n = Math.max(1, Math.floor(ctx.sampleRate * sec));
+  const b = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = b.getChannelData(0);
+  let lp = 0;
+  for(let i = 0; i < n; i++){
+    lp += (Math.random() * 2 - 1 - lp) * 0.72;
+    d[i] = lp;
+  }
+  return b;
+}
+
+/* 程序生成的混响脉冲：指数衰减的噪声，带一点点低通让尾音更闷 */
+function audioImpulse(ctx, sec, decay){
+  const n = Math.max(1, Math.floor(ctx.sampleRate * sec));
+  const b = ctx.createBuffer(2, n, ctx.sampleRate);
+  for(let c = 0; c < 2; c++){
+    const d = b.getChannelData(c);
+    let lp = 0;
+    for(let i = 0; i < n; i++){
+      const k = Math.pow(1 - i / n, decay);
+      lp += (Math.random() * 2 - 1 - lp) * 0.38;
+      d[i] = lp * k;
+    }
+  }
+  return b;
+}
+
+/* ---------------- 初始化 ---------------- */
+function audioInit(){
+  const A = AUDIO;
+  if(A.ctx || A.dead) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if(!AC){ A.dead = true; return; }
+  let ctx = null;
+  try{ ctx = new AC({latencyHint: 'interactive'}); }
+  catch(_){ try{ ctx = new AC(); }catch(__){ A.dead = true; return; } }
+  A.ctx = ctx;
+  try{ if(ctx.state === 'suspended') ctx.resume(); }catch(_){}
+
+  if(typeof Q !== 'undefined' && Q.has('mute')) A.muted = true;
+
+  A.noise = audioNoise(ctx, 2.0);
+
+  const master = ctx.createGain();
+  master.gain.value = 0.0001;
+  let tail = master;
+  if(ctx.createDynamicsCompressor){
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -15;
+    comp.knee.value = 18;
+    comp.ratio.value = 8;
+    comp.attack.value = 0.004;
+    comp.release.value = 0.22;
+    master.connect(comp);
+    tail = comp;
+  }
+  tail.connect(ctx.destination);
+  A.master = master;
+  master.gain.setTargetAtTime(A.muted ? 0.0001 : 0.9, ctx.currentTime + 0.04, 0.18);
+
+  const sfx = ctx.createGain();
+  sfx.gain.value = 1.0;
+  sfx.connect(master);
+  A.sfx = sfx;
+
+  if(ctx.createConvolver){
+    try{
+      const rev = ctx.createConvolver();
+      rev.buffer = audioImpulse(ctx, 1.7, 3.0);
+      const rg = ctx.createGain();
+      rg.gain.value = 0.30;
+      rev.connect(rg); rg.connect(master);
+      A.reverb = rev;
+    }catch(_){}
+  }
+
+  A.ok = true;
+  buildEngineSound();
+  audioLabel();
+}
+
+function audioLabel(){
+  const el = document.getElementById('tmute');
+  if(el) el.textContent = AUDIO.muted ? '声音 关' : '声音 开';
+}
+
+function audioToggle(){
+  if(!AUDIO.ctx) audioInit();
+  if(!AUDIO.ctx) return;
+  AUDIO.muted = !AUDIO.muted;
+  try{ localStorage.setItem('cdmyx.mute', AUDIO.muted ? '1' : '0'); }catch(_){}
+  try{
+    AUDIO.master.gain.setTargetAtTime(AUDIO.muted ? 0.0001 : 0.9, AUDIO.ctx.currentTime, 0.05);
+  }catch(_){}
+  audioLabel();
+}
+
+/* ---------------- 常驻声源：发动机 / 履带 / 风 ---------------- */
+function buildEngineSound(){
+  const ctx = AUDIO.ctx;
+  if(!ctx) return;
+  const g = ctx.createGain();
+  g.gain.value = 0.0001;
+
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 380; lp.Q.value = 0.8;
+  lp.connect(g);
+
+  const mkOsc = (type, freq, gain) => {
+    const o = ctx.createOscillator();
+    o.type = type; o.frequency.value = freq;
+    const gg = ctx.createGain(); gg.gain.value = gain;
+    o.connect(gg); gg.connect(lp);
+    o.start();
+    return o;
+  };
+  const o1 = mkOsc('sawtooth', 33, 0.55);
+  const o2 = mkOsc('sawtooth', 49.5, 0.28);
+  const o3 = mkOsc('triangle', 16.5, 0.60);
+
+  /* 机械噪声 */
+  const ns = ctx.createBufferSource();
+  ns.buffer = AUDIO.noise; ns.loop = true;
+  const nbp = ctx.createBiquadFilter();
+  nbp.type = 'bandpass'; nbp.frequency.value = 780; nbp.Q.value = 0.9;
+  const ng = ctx.createGain(); ng.gain.value = 0.0001;
+  ns.connect(nbp); nbp.connect(ng); ng.connect(g);
+  ns.start();
+
+  /* 履带：低频噪声被方波 LFO 斩成一节一节的咔哒 */
+  const ts = ctx.createBufferSource();
+  ts.buffer = AUDIO.noise; ts.loop = true;
+  const tbp = ctx.createBiquadFilter();
+  tbp.type = 'bandpass'; tbp.frequency.value = 240; tbp.Q.value = 0.7;
+  const trem = ctx.createGain(); trem.gain.value = 0.55;
+  const tg = ctx.createGain(); tg.gain.value = 0.0001;
+  const lfo = ctx.createOscillator(); lfo.type = 'square'; lfo.frequency.value = 4;
+  const lfoG = ctx.createGain(); lfoG.gain.value = 0.45;
+  lfo.connect(lfoG); lfoG.connect(trem.gain); lfo.start();
+  ts.connect(tbp); tbp.connect(trem); trem.connect(tg); tg.connect(g);
+  ts.start();
+
+  /* 风噪：只随车速，不进发动机低通 */
+  const ws = ctx.createBufferSource();
+  ws.buffer = AUDIO.noise; ws.loop = true;
+  const wlp = ctx.createBiquadFilter();
+  wlp.type = 'lowpass'; wlp.frequency.value = 380;
+  const wg = ctx.createGain(); wg.gain.value = 0.0001;
+  ws.connect(wlp); wlp.connect(wg); wg.connect(AUDIO.sfx);
+  ws.start();
+
+  g.connect(AUDIO.master);
+  AUDIO.eng = { g, lp, o1, o2, o3, nbp, ng, lfo, tbp, tg, wg, wlp };
+}
+
+/* ---------------- 位置 → 音量 / 声像 ---------------- */
+function audioAt(p, vol){
+  const dx = p[0] - cam.pos[0], dy = p[1] - cam.pos[1], dz = p[2] - cam.pos[2];
+  const d = Math.hypot(dx, dy, dz);
+  const att = 1 / (1 + d * d * 0.00045);
+  const inv = d > 1e-3 ? 1 / d : 0;
+  const pan = clamp((dx * cam.right[0] + dy * cam.right[1] + dz * cam.right[2]) * inv * 0.8, -0.85, 0.85);
+  return { gain: vol * att, pan };
+}
+
+function audioBus(p, vol, wet){
+  const ctx = AUDIO.ctx;
+  const loc = audioAt(p, vol);
+  const g = ctx.createGain();
+  g.gain.value = Math.max(0.0001, loc.gain);
+  let out = g;
+  if(ctx.createStereoPanner){
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = loc.pan;
+    g.connect(pan);
+    out = pan;
+  }
+  out.connect(AUDIO.sfx);
+  if(wet > 0 && AUDIO.reverb){
+    const send = ctx.createGain();
+    send.gain.value = wet;
+    out.connect(send); send.connect(AUDIO.reverb);
+  }
+  return g;
+}
+
+/* ---------------- 事件音 ---------------- */
+function sndShot(p, own){
+  if(!AUDIO.ok) return;
+  const ctx = AUDIO.ctx, t = ctx.currentTime;
+  const out = audioBus(p, own ? 0.50 : 0.30, 0.30);
+
+  /* 爆裂：噪声低通扫频 */
+  const n = ctx.createBufferSource();
+  n.buffer = AUDIO.noise;
+  n.playbackRate.value = 1.3 + Math.random() * 0.35;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(6200, t);
+  lp.frequency.exponentialRampToValueAtTime(320, t + 0.14);
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, t);
+  ng.gain.exponentialRampToValueAtTime(0.85, t + 0.003);
+  ng.gain.exponentialRampToValueAtTime(0.0012, t + 0.19);
+  n.connect(lp); lp.connect(ng); ng.connect(out);
+  n.start(t); n.stop(t + 0.22);
+
+  /* 低频冲击 */
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(165, t);
+  o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.exponentialRampToValueAtTime(0.50, t + 0.005);
+  og.gain.exponentialRampToValueAtTime(0.0012, t + 0.20);
+  o.connect(og); og.connect(out);
+  o.start(t); o.stop(t + 0.24);
+}
+
+/* 命中装甲：几个非谐波正弦 + 一点破片噪声 = 金属被砸中的「叮」 */
+function sndPing(p, vol, pitch){
+  if(!AUDIO.ok) return;
+  const ctx = AUDIO.ctx, t = ctx.currentTime;
+  const out = audioBus(p, vol == null ? 0.5 : vol, 0.22);
+  const base = 380 * (pitch || 1);
+  for(const part of [[1, 0.55, 0.42], [2.41, 0.26, 0.26], [4.13, 0.13, 0.16]]){
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.value = base * part[0] * (0.95 + Math.random() * 0.1);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(part[1], t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + part[2]);
+    o.connect(g); g.connect(out);
+    o.start(t); o.stop(t + part[2] + 0.02);
+  }
+  const n = ctx.createBufferSource();
+  n.buffer = AUDIO.noise; n.playbackRate.value = 1.4;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = 2600; bp.Q.value = 1.4;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, t);
+  ng.gain.exponentialRampToValueAtTime(0.30, t + 0.003);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+  n.connect(bp); bp.connect(ng); ng.connect(out);
+  n.start(t); n.stop(t + 0.12);
+}
+
+/* 打到地面：闷响 + 沙土 */
+function sndGroundHit(p){
+  if(!AUDIO.ok) return;
+  const ctx = AUDIO.ctx, t = ctx.currentTime;
+  const out = audioBus(p, 0.45, 0.16);
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(95, t);
+  o.frequency.exponentialRampToValueAtTime(38, t + 0.14);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.exponentialRampToValueAtTime(0.55, t + 0.006);
+  og.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+  o.connect(og); og.connect(out);
+  o.start(t); o.stop(t + 0.24);
+
+  const n = ctx.createBufferSource();
+  n.buffer = AUDIO.noise; n.playbackRate.value = 0.9;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 900;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, t);
+  ng.gain.exponentialRampToValueAtTime(0.28, t + 0.008);
+  ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+  n.connect(lp); lp.connect(ng); ng.connect(out);
+  n.start(t); n.stop(t + 0.2);
+}
+
+/* 击毁：低频冲击 + 长噪声 + 噼啪余烬 */
+function sndBoom(p){
+  if(!AUDIO.ok) return;
+  const ctx = AUDIO.ctx, t = ctx.currentTime;
+  const out = audioBus(p, 1.0, 0.55);
+
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(120, t);
+  o.frequency.exponentialRampToValueAtTime(25, t + 1.1);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.exponentialRampToValueAtTime(0.95, t + 0.02);
+  og.gain.exponentialRampToValueAtTime(0.001, t + 1.5);
+  o.connect(og); og.connect(out);
+  o.start(t); o.stop(t + 1.55);
+
+  const n = ctx.createBufferSource();
+  n.buffer = AUDIO.noise; n.playbackRate.value = 0.9;
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(2600, t);
+  lp.frequency.exponentialRampToValueAtTime(110, t + 1.4);
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, t);
+  ng.gain.exponentialRampToValueAtTime(0.80, t + 0.02);
+  ng.gain.exponentialRampToValueAtTime(0.001, t + 1.7);
+  n.connect(lp); lp.connect(ng); ng.connect(out);
+  n.start(t); n.stop(t + 1.75);
+
+  /* 噼啪：随机时间点的小噪声 */
+  for(let i = 0; i < 7; i++){
+    const dt = Math.random() * 0.7;
+    const s = ctx.createBufferSource();
+    s.buffer = AUDIO.noise;
+    s.playbackRate.value = 0.8 + Math.random() * 1.6;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 900 + Math.random() * 2800;
+    bp.Q.value = 2.2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t + dt);
+    g.gain.exponentialRampToValueAtTime(0.12, t + dt + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.08);
+    s.connect(bp); bp.connect(g); g.connect(out);
+    s.start(t + dt); s.stop(t + dt + 0.1);
+  }
+}
+
+/* 换弹：两声机械咔哒 */
+function sndReload(){
+  if(!AUDIO.ok) return;
+  const ctx = AUDIO.ctx, t = ctx.currentTime;
+  const clunk = (when, freq, vol) => {
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(freq, when);
+    o.frequency.exponentialRampToValueAtTime(freq * 0.55, when + 0.06);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(vol, when + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.12);
+    o.connect(g); g.connect(AUDIO.sfx);
+    o.start(when); o.stop(when + 0.14);
+  };
+  clunk(t, 260, 0.30);
+  clunk(t + 0.34, 190, 0.34);
+  clunk(t + 0.62, 320, 0.22);
+}
+
+function sndEmpty(){
+  if(!AUDIO.ok) return;
+  const ctx = AUDIO.ctx, t = ctx.currentTime;
+  const n = ctx.createBufferSource();
+  n.buffer = AUDIO.noise; n.playbackRate.value = 1.8;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = 3200; bp.Q.value = 1.2;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.18, t + 0.003);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+  n.connect(bp); bp.connect(g); g.connect(AUDIO.sfx);
+  n.start(t); n.stop(t + 0.07);
+}
+
+/* 受击警告 */
+function sndHurt(){
+  if(!AUDIO.ok) return;
+  const ctx = AUDIO.ctx, t = ctx.currentTime;
+  for(let i = 0; i < 2; i++){
+    const when = t + i * 0.14;
+    const o = ctx.createOscillator();
+    o.type = 'square';
+    o.frequency.value = i ? 620 : 880;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(0.10, when + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.10);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 2200;
+    o.connect(lp); lp.connect(g); g.connect(AUDIO.sfx);
+    o.start(when); o.stop(when + 0.12);
+  }
+}
+
+/* 巡航档位 / UI 点击 */
+function sndClick(up){
+  if(!AUDIO.ok) return;
+  const ctx = AUDIO.ctx, t = ctx.currentTime;
+  const o = ctx.createOscillator();
+  o.type = 'square';
+  o.frequency.value = up ? 1180 : 820;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.055, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+  o.connect(g); g.connect(AUDIO.sfx);
+  o.start(t); o.stop(t + 0.07);
+}
+
+/* ---------------- 每帧更新常驻声源 ---------------- */
+function updateAudio(dt){
+  const A = AUDIO;
+  if(!A.ok || !A.eng) return;
+  const ctx = A.ctx, E = A.eng, now = ctx.currentTime;
+  if(ctx.state === 'suspended'){ try{ ctx.resume(); }catch(_){} }
+
+  const set = (prm, v, k) => { try{ prm.setTargetAtTime(Math.max(0.0001, v), now, k || 0.1); }catch(_){} };
+
+  const live = (typeof STARTED !== 'undefined') && STARTED && !NET.self.dead;
+  const v = Math.abs(((car.vL || 0) + (car.vR || 0)) * 0.5);
+  const spd = Math.min(1, v / 13);
+  const f = 24 + v * 2.1;
+
+  set(E.g.gain, live ? (0.055 + spd * 0.085) : 0.0001, 0.18);
+  set(E.o1.frequency, f, 0.16);
+  set(E.o2.frequency, f * 1.5 + 0.8, 0.16);
+  set(E.o3.frequency, Math.max(11, f * 0.5), 0.16);
+  set(E.lp.frequency, 300 + v * 26 + (live ? 90 : 0), 0.12);
+  set(E.nbp.frequency, 700 + v * 55, 0.16);
+  set(E.ng.gain, live ? (0.02 + spd * 0.045) : 0.0001, 0.18);
+  set(E.lfo.frequency, Math.max(0.6, 1.5 + v * 1.9), 0.2);
+  set(E.tbp.frequency, 180 + v * 16, 0.16);
+  set(E.tg.gain, live ? (0.005 + spd * 0.05) : 0.0001, 0.18);
+  set(E.wg.gain, live ? (0.004 + spd * 0.022) : 0.0001, 0.25);
+  set(E.wlp.frequency, 300 + v * 45, 0.2);
+}
+
+/* 第一次交互再建 AudioContext（自动播放策略） */
+addEventListener('pointerdown', audioInit, {passive: true});
+addEventListener('keydown', audioInit);
+
+/* ===================== 58_wreck.js ===================== */
+/* ============================ 击毁演出 ============================ */
+/*  被击毁的车：爆一次（netBlowUp）之后留下
+      · 一堆带物理的焦黑碎片（铁片 / 方块 / 炮管段）
+      · 20 多秒的火苗 + 烟柱 + 余烬 + 闪动的火光
+      · 地面焦痕
+    碎片用 pObj 管线画，不需要新的着色器；火烟直接复用 55_combat 的粒子系统。 */
+
+const DEBRIS = [];
+const DEBRIS_CAP = 110;
+const WRECKS = [];
+const WRECK_CAP = 3;
+const WRECK_LIFE = 26;
+
+/* 三种碎片：铁片 / 方块 / 杆件 */
+const debrisMesh = (() => {
+  const col = [0.052, 0.046, 0.040];
+  const mat = [0.88, 0.45, 1.0];
+  const mk = (sx, sy, sz) => {
+    const v = [];
+    addBox(v, 0, 0, 0, sx, sy, sz, col, mat, 310);
+    return uploadMesh(v);
+  };
+  return [ mk(1.00, 0.10, 0.70), mk(0.42, 0.42, 0.42), mk(0.13, 1.15, 0.13) ];
+})();
+
+function wreckRotZ(a){
+  const c = Math.cos(a), s = Math.sin(a), o = M4.ident();
+  o[0] = c; o[1] = s; o[4] = -s; o[5] = c;
+  return o;
+}
+function wreckScale(s){
+  const o = M4.ident();
+  o[0] = s; o[5] = s; o[10] = s;
+  return o;
+}
+function debrisMatrix(d){
+  const fade = d.life < 2.0 ? Math.max(0.001, d.life / 2.0) : 1.0;
+  let m = M4.translate(d.p[0], d.p[1], d.p[2]);
+  m = M4.mul(m, M4.rotY(d.rot[1]));
+  m = M4.mul(m, M4.rotX(d.rot[0]));
+  m = M4.mul(m, wreckRotZ(d.rot[2]));
+  m = M4.mul(m, wreckScale(d.s * fade));
+  return m;
+}
+
+/* 在 p 处留下一处燃烧的残骸（含一圈飞散的碎片） */
+function spawnWreck(p){
+  const x = p[0], z = p[2];
+  WRECKS.push({ x, z, t: 0, smokeAcc: 0, fireAcc: 0, sparkAcc: 0, lightAcc: 0 });
+  while(WRECKS.length > WRECK_CAP) WRECKS.shift();
+
+  /* 地面焦痕 */
+  addScorch(x, z);
+  for(let i = 0; i < 3; i++) addScorch(x + rr(-1.2, 1.2), z + rr(-1.2, 1.2));
+
+  /* 碎片向外飞散 */
+  const n = 12;
+  for(let i = 0; i < n; i++){
+    const a = (i / n) * Math.PI * 2 + rr(-0.35, 0.35);
+    const sp = rr(4.5, 13.0);
+    DEBRIS.push({
+      p: [x + Math.cos(a) * 0.55, rr(0.7, 1.6), z + Math.sin(a) * 0.55],
+      v: [Math.cos(a) * sp, rr(3.5, 11.0), Math.sin(a) * sp],
+      rot: [Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28],
+      rv: [rr(-9, 9), rr(-9, 9), rr(-9, 9)],
+      s: rr(0.7, 1.5),
+      shape: i % 3 === 0 ? 2 : (i % 3 === 1 ? 1 : 0),
+      rest: false,
+      life: rr(20, 26),
+    });
+    if(DEBRIS.length > DEBRIS_CAP) DEBRIS.shift();
+  }
+}
+
+function updateWrecks(dt){
+  /* ---- 残骸：持续燃烧 ---- */
+  for(let i = WRECKS.length - 1; i >= 0; i--){
+    const w = WRECKS[i];
+    w.t += dt;
+    if(w.t > WRECK_LIFE){ WRECKS.splice(i, 1); continue; }
+
+    /* 前 1 秒是大火，之后逐渐收敛成稳定的烟柱，最后 6 秒淡出 */
+    const fade = w.t < WRECK_LIFE - 6 ? 1 : Math.max(0, (WRECK_LIFE - w.t) / 6);
+    const strength = (w.t < 1.2 ? 0.35 + w.t * 0.5 : 1.0) * fade;
+
+    w.smokeAcc += dt;
+    const smokeGap = 0.10 + 0.07 * Math.min(1, w.t / 8);
+    while(w.smokeAcc > smokeGap){
+      w.smokeAcc -= smokeGap;
+      SMOKES.push({
+        p: [w.x + rr(-0.85, 0.85), 1.35 + rr(0, 0.9), w.z + rr(-0.85, 0.85)],
+        v: [rr(-0.55, 0.55), rr(1.2, 2.2) * Math.max(0.25, strength), rr(-0.55, 0.55)],
+        life: rr(1.8, 3.2), maxLife: 3.2, size: rr(0.75, 1.35) * (0.7 + 0.5 * strength),
+        seed: Math.random(),
+      });
+    }
+
+    w.fireAcc += dt;
+    if(w.fireAcc > 0.06){
+      w.fireAcc = 0;
+      const k = rr(0.45, 1.0) * strength;
+      if(k > 0.02){
+        FLASHES.push({
+          p: [w.x + rr(-0.95, 0.95), 1.0 + rr(0, 0.8), w.z + rr(-0.95, 0.95)],
+          dir: [0, 1, 0], life: 0.10, maxLife: 0.10,
+          size: rr(0.35, 0.85) * (0.55 + k), seed: Math.random(), kind: 0,
+          col: [3.2 * k, 1.15 * k, 0.32 * k, 0.8 * k],
+        });
+      }
+    }
+
+    w.sparkAcc += dt;
+    if(w.sparkAcc > 0.10){
+      w.sparkAcc = 0;
+      if(SPARKS.length < 400){
+        const a = Math.random() * 6.283, sp = rr(0.3, 2.2);
+        SPARKS.push({
+          p: [w.x + rr(-0.7, 0.7), 1.0 + rr(0, 0.9), w.z + rr(-0.7, 0.7)],
+          v: [Math.cos(a) * sp, rr(1.4, 3.6), Math.sin(a) * sp],
+          life: rr(0.5, 1.5), size: rr(0.03, 0.07), hot: 1.0,
+        });
+      }
+    }
+
+    /* 火光：闪动照亮车身残片和周围沙地 */
+    w.lightAcc += dt;
+    if(w.lightAcc > 0.09 && w.t < 20){
+      w.lightAcc = 0;
+      LIGHTS.push({
+        p: [w.x + rr(-0.5, 0.5), 1.3, w.z + rr(-0.5, 0.5)],
+        col: [1.0, 0.46, 0.15],
+        intensity: (1.2 + Math.random() * 1.6) * strength,
+        life: 0.19, maxLife: 0.19,
+      });
+    }
+  }
+
+  /* ---- 碎片物理 ---- */
+  for(let i = DEBRIS.length - 1; i >= 0; i--){
+    const d = DEBRIS[i];
+    d.life -= dt;
+    if(d.life <= 0){ DEBRIS.splice(i, 1); continue; }
+    if(d.rest) continue;
+
+    d.v[1] -= 11.5 * dt;
+    d.p[0] += d.v[0] * dt; d.p[1] += d.v[1] * dt; d.p[2] += d.v[2] * dt;
+    d.rot[0] += d.rv[0] * dt; d.rot[1] += d.rv[1] * dt; d.rot[2] += d.rv[2] * dt;
+
+    const half = 0.14 * d.s;
+    if(d.p[1] < half){
+      d.p[1] = half;
+      if(Math.abs(d.v[1]) < 1.1){
+        d.v[1] = 0;
+        d.v[0] *= 0.52; d.v[2] *= 0.52;
+        d.rv[0] *= 0.4; d.rv[1] *= 0.4; d.rv[2] *= 0.4;
+        if(Math.hypot(d.v[0], d.v[2]) < 0.22){
+          d.rest = true;
+          d.v[0] = d.v[2] = 0;
+          d.rv[0] = d.rv[1] = d.rv[2] = 0;
+        }
+      }else{
+        d.v[1] *= -0.34;
+        d.v[0] *= 0.72; d.v[2] *= 0.72;
+        d.rv[0] *= 0.6; d.rv[1] *= 0.6; d.rv[2] *= 0.6;
+        if(Math.random() < 0.45)
+          spawnDust(d.p[0], 0.10, d.p[2], rr(-0.5, 0.5), rr(0.4, 1.1), rr(-0.5, 0.5), rr(0.3, 0.7));
+      }
+    }
+  }
+}
+
+function drawWrecks(pr){
+  for(const d of DEBRIS) drawObject(debrisMesh[d.shape], debrisMatrix(d), pr);
 }
 
 /* ===================== 60_gpu.js ===================== */
@@ -4027,6 +4714,7 @@ function cycleCruise(dir){
   if(dir > 0) cruise = (cruise >= 1 && cruise < 3) ? cruise + 1 : (cruise >= 3 ? 0 : 1);
   else        cruise = (cruise <= -1 && cruise > -3) ? cruise - 1 : (cruise <= -3 ? 0 : -1);
   cruiseFlash = 1.2;
+  if(typeof sndClick === 'function') sndClick(cruise >= 0);
 }
 function cancelCruise(){ cruise = 0; }
 
@@ -4098,6 +4786,7 @@ addEventListener('keydown', e => {
   if(e.code === 'KeyE' && !e.repeat){ cycleCruise(1); e.preventDefault(); }
   else if(e.code === 'KeyQ' && !e.repeat){ cycleCruise(-1); e.preventDefault(); }
   else if(e.code === 'KeyC'){ freeLook = true; e.preventDefault(); }
+  else if(e.code === 'KeyM' && !e.repeat){ audioToggle(); e.preventDefault(); }
 });
 addEventListener('keyup', e => {
   if(e.code === 'KeyC') freeLook = false;
@@ -4194,7 +4883,8 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
     <div id="tcrR" class="tbtn">巡航−</div>
     <div id="tchint">左摇杆驾驶 · 屏上拖动瞄准</div>
     <div id="trot">点此横屏</div>
-    <div id="tflip">⇄ 翻转</div>`;
+    <div id="tflip">⇄ 翻转</div>
+    <div id="tmute">声音 开</div>`;
   document.body.appendChild(wrap);
 
   const $ = s => wrap.querySelector(s);
@@ -4203,6 +4893,7 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
   const crFEl = $('#tcrF'), crREl = $('#tcrR'), hintEl = $('#tchint');
   const rotEl = $('#trot');
   const flipEl = $('#tflip');
+  const muteEl = $('#tmute');
 
   /* ================= 横屏 ================= */
   /*  优先让系统自己转：requestFullscreen + screen.orientation.lock('landscape')。
@@ -4280,6 +4971,10 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
       e.preventDefault();
       if(rot90) setRot(true, -rotDir);      // 90° ↔ -90°，哪种握法都能看正
     });
+  }
+  if(muteEl){
+    muteEl.addEventListener('pointerdown', e => { e.preventDefault(); audioToggle(); });
+    muteEl.textContent = AUDIO.muted ? '声音 关' : '声音 开';
   }
 
   /* ---------------- 摇杆 ---------------- */
@@ -4837,6 +5532,14 @@ function texCube(unit, t, loc){ gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTex
 /* ---- 动态点光：炮口焰 / 爆炸，最多 4 个 ---- */
 const lightPosArr = new Float32Array(LIGHT_MAX * 3);
 const lightColArr = new Float32Array(LIGHT_MAX * 3);
+
+/* ---- 震屏：开炮 / 爆炸时给相机加一点随机抖动，指数衰减 ---- */
+let shakeAmp = 0;
+function addShake(a){
+  if(Q.has('noshake')) return;
+  shakeAmp = Math.min(1.15, shakeAmp + a);
+}
+
 function updateLights(){
   lightPosArr.fill(0); lightColArr.fill(0);
   if(!LIGHTS.length) return;
@@ -5292,6 +5995,7 @@ function draw(){
   /* 靶标（模型着色器会切走 program，这里重建 pObj 状态） */
   useObjProgram();
   drawTargets(pObj);
+  drawWrecks(pObj);
 
   /* 抛壳 + 曳光 / 火花 / 炮口焰 / 烟（不写深度） */
   drawCasings();
@@ -5536,8 +6240,21 @@ function updateCamMatrices(){
     jitX = 0; jitY = 0;
   }
 
+  /* 震屏：往视线方向上叠一点随机偏转（角度很小，不然会晕） */
+  let shakeFwd = cam.fwd;
+  if(shakeAmp > 0.0015){
+    const sa = (Math.random() - 0.5) * shakeAmp * 0.045;
+    const sb = (Math.random() - 0.5) * shakeAmp * 0.045;
+    const r = cam.right, u = cam.up;
+    const f = [cam.fwd[0] + r[0]*sa + u[0]*sb,
+               cam.fwd[1] + r[1]*sa + u[1]*sb,
+               cam.fwd[2] + r[2]*sa + u[2]*sb];
+    const L = Math.hypot(f[0], f[1], f[2]) || 1;
+    shakeFwd = [f[0]/L, f[1]/L, f[2]/L];
+  }
+
   VIEW = M4.lookAt(cam.pos,
-    [cam.pos[0]+cam.fwd[0], cam.pos[1]+cam.fwd[1], cam.pos[2]+cam.fwd[2]],
+    [cam.pos[0]+shakeFwd[0], cam.pos[1]+shakeFwd[1], cam.pos[2]+shakeFwd[2]],
     cam.up);
   VP = M4.mul(PROJ, VIEW);
   INV_PROJ = M4.invert(PROJ);
@@ -5563,8 +6280,17 @@ function step(dt){
   buildMatrices();
   updateTargets(dt, simT);
   updateCombat(simT, dt);
+  updateWrecks(dt);
   updateLights();
   buildFX();
+
+  /* 震屏衰减 */
+  if(shakeAmp > 0){
+    shakeAmp *= Math.exp(-dt * 4.2);
+    if(shakeAmp < 0.0015) shakeAmp = 0;
+  }
+  /* 声音跟着车走 */
+  updateAudio(dt);
 }
 
 const elapsed = () => simT;
@@ -5972,6 +6698,7 @@ function startGame(){
   if(hint && !NO_LOCK && AIM_WORLD) hint.style.opacity = '1';
   /* 手机：进战斗时顺手请求横屏（用户手势里，全屏 + orientation lock 才被允许） */
   if(TOUCH && typeof window.goLandscape === 'function') window.goLandscape();
+  if(typeof audioInit === 'function') audioInit();
   netOnStart();                       // 联机：开始广播自己的状态
   tryLock();                        // 点击/回车都是用户手势，可以直接锁
 }
@@ -6312,6 +7039,8 @@ function netOnShot(mz, dir){
 /* 别人的炮弹：只画，不结算（伤害由房主下发） */
 function netGhostShell(mz, dir){
   if(!Array.isArray(mz) || !Array.isArray(dir)) return;
+  /* 远处别人的炮声：带距离衰减和左右声像 */
+  if(typeof sndShot === 'function') sndShot(mz, false);
   SHELLS.push({
     p: [mz[0], mz[1], mz[2]],
     prev: [mz[0], mz[1], mz[2]],
@@ -6828,7 +7557,7 @@ function netHostDamage(toSlot, dmg, bySlot){
   const vc = netConnOf(toSlot);
   if(vc) try{ vc.send({ t: 'hurt', hp: r.hp, by: netNameOf(bySlot) }); }catch(e){}
 
-  if(toSlot === NET.slot) NET.dmgFlash = 1;
+  if(toSlot === NET.slot){ NET.dmgFlash = 1; sndHurt(); }
 
   if(r.hp <= 0){
     const killer = netRec(bySlot);
@@ -7098,6 +7827,7 @@ function netClientData(peer, d){
   }
   if(d && d.t === 'hurt'){
     NET.dmgFlash = 1;
+    sndHurt();
     NET.self.hp = Math.max(0, d.hp | 0);
     NET.maxHp = NET.maxHp || netMaxHp(SELECTED_ID);
     if(NET.self.hp <= 0) netDie(String(d.by || ''));
