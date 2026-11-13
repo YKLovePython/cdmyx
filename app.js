@@ -2829,6 +2829,11 @@ function buildWorld(){
 
   } else {
   /* ---- 无地图：白模试验场（零下载） ---- */
+  /* 出生点左边的测试道要留空，不能长石头 / 摆掩体 */
+  const inLane = (x, z, r) =>
+    x > LANE_ZONE.x0 - r && x < LANE_ZONE.x1 + r &&
+    z > LANE_ZONE.z0 - r && z < LANE_ZONE.z1 + r;
+
   // 远山
   const RING = 220, RAD = 1250;
   for(let i = 0; i < RING; i++){
@@ -2849,6 +2854,7 @@ function buildWorld(){
     const a = rr(0, Math.PI * 2), d = rr(30, 340);
     const cx = Math.cos(a) * d, cz = Math.sin(a) * d;
     const s = rr(0.35, 1.7);
+    if(inLane(cx, cz, 4 + s * 1.5)) continue;
     const rot = rr(0, Math.PI * 2);
     const tone = rr(0.40, 0.58);
     addRock(v, cx, groundH(cx, cz) + s * 0.35, cz, s, rot, [tone * 1.02, tone, tone * 0.97], pid);
@@ -2870,9 +2876,11 @@ function buildWorld(){
   for(let i = 0; i < 7; i++){
     const a = rr(0, Math.PI * 2), d = rr(20, 90);
     const bx = Math.cos(a) * d, bz = Math.sin(a) * d;
+    const sx = rr(1.6, 3.2), sz = rr(0.8, 1.6);
+    if(inLane(bx, bz, 5) || Math.hypot(bx, bz - 6) < 12) continue;
     const tone = rr(0.50, 0.66);
     const sy = rr(0.7, 1.1);
-    addBox(v, bx, groundH(bx, bz) + sy * 0.5, bz, rr(1.6, 3.2), sy, rr(0.8, 1.6),
+    addBox(v, bx, groundH(bx, bz) + sy * 0.5, bz, sx, sy, sz,
            [tone, tone * 1.01, tone * 1.03], [0.85, 0.0, 1.0], pid, rr(-0.4, 0.4));
   }
   pid++;
@@ -2881,8 +2889,29 @@ function buildWorld(){
   for(let i = 0; i < 10; i++){
     const a = rr(0, Math.PI * 2), d = rr(14, 80);
     const bx = Math.cos(a) * d, bz = Math.sin(a) * d, y = groundH(bx, bz);
+    if(inLane(bx, bz, 4) || Math.hypot(bx, bz - 6) < 10) continue;
     addCyl(v, [bx, y, bz], [bx, y + 0.88, bz], 0.29, 0.29, 8,
            [0.30, 0.16, 0.10], [0.70, 0.15, 1.0], pid);
+  }
+  pid++;
+
+  /* ---- 测试道标线：两侧白杆 + 入口起跑线 ---- */
+  const laneEdge = LANE.halfW + 2.6;      // 杆子放在 11.6 m
+  for(let x = 34; x <= 302; x += 12){
+    for(const s of [-1, 1]){
+      const z = s * laneEdge;
+      const y = groundH(x, z);
+      addBox(v, x, y + 0.55, z, 0.10, 1.10, 0.10, [0.80, 0.81, 0.80], [0.8, 0.0, 1.0], pid);
+      addBox(v, x, y + 1.14, z, 0.16, 0.10, 0.16, [0.92, 0.62, 0.22], [0.7, 0.0, 1.0], pid);
+    }
+  }
+  /* 入口横线：贴地薄板，提示测试道从这里开始 */
+  addBox(v, LANE.x0 + 1.0, 0.025, 0, 0.5, 0.05, (LANE.halfW + 2.6) * 2,
+         [0.78, 0.78, 0.76], [0.9, 0.0, 1.0], pid);
+  /* 测试道中段的分区横线（每段起点） */
+  for(const mx of [112, 172, 220, 269]){
+    addBox(v, mx, groundH(mx, 0) + 0.025, 0, 0.35, 0.05, LANE.halfW * 2,
+           [0.70, 0.70, 0.68], [0.9, 0.0, 1.0], pid);
   }
   pid++;
 
@@ -3146,95 +3175,119 @@ function mapBuildHouses(){
   return models;
 }
 
-/* ---------------- 白模试验场地形 ---------------- */
-/*  纯程序化高度场：中央出生区/靶道保持平整，两侧是缓坡、土丘、
-    长条土垄、反坦克壕和浅洼地；场地外平滑回到 0（外面就是平原）。 */
+/* ---------------- 白模试验场：全平地 + 出生点左侧测试道 ---------------- */
+/*  场地其余部分完全是水平面（y=0）：跑车、校炮、对靶都不会被地形干扰。
+    出生点 (0,6) 面向 +Z，左手边（屏幕左侧 = +X）铺一条 288 m 长的测试道，
+    依次是：
+      1. 45~112 m   连续小波浪（±0.34 m，波长 10 m）
+      2. 118~172 m  两个大起伏坡（2.1 m 高，坡长 26 m）
+      3. 178~220 m  单边坡道 + 3 m 平台（上坡缓、另一侧陡）
+      4. 238~269 m  减速带 ×3 + 0.5 m 台阶
+      5. 276~306 m  侧倾坡（横向约 ±2 m，最陡 19°）
+    测试道两侧 3 m 内平滑回落到平地，所以侧倾坡边缘也是软坡。       */
+
+const LANE = { x0: 26, x1: 314, halfW: 9, fade: 3 };
+/* 测试道占用的世界范围：随机道具要避开这里 */
+const LANE_ZONE = { x0: 12, x1: 330, z0: -18, z1: 18 };
+
 function boFall(t){
   t = Math.max(0, Math.min(1, t));
   return t * t * (3 - 2 * t);
 }
 
-/* 椭圆余弦土包：中心 h，边缘 0 且坡度为 0（可叠加负值做洼地） */
-function boBump(x, z, cx, cz, rx, rz, h, rot){
-  const dx = x - cx, dz = z - cz;
-  const c = Math.cos(rot), s = Math.sin(rot);
-  const u = (dx * c + dz * s) / rx;
-  const v = (-dx * s + dz * c) / rz;
-  const r2 = u * u + v * v;
-  if(r2 >= 1) return 0;
-  return h * 0.5 * (1 + Math.cos(Math.PI * Math.sqrt(r2)));
+/* 区间平滑：x<a 为 0，x>b 为 1，中间 smoothstep */
+function boStep(a, b, x){
+  if(a === b) return x < a ? 0 : 1;
+  return boFall((x - a) / (b - a));
+}
+/* a..b 淡入、c..d 淡出的窗函数 */
+function boEnv(x, a, b, c, d){
+  return boStep(a, b, x) * (1 - boStep(c, d, x));
 }
 
-function blockoutH(x, z){
-  const r0 = Math.hypot(x, z);
-  /* 中央 60 m 完全平整，外面 70 m 过渡到起伏地形 */
-  const pad = boFall((r0 - 58) / 70);
-  /* 场地边缘 480~620 m 平滑收回 0 */
-  const edge = 1 - boFall((r0 - 480) / 140);
-  const k = pad * edge;
+/* 测试道本身的高度剖面（还没有乘内外遮罩） */
+function laneH(x, z){
   let h = 0;
 
-  /* 低频起伏的底色（约 ±1.6 m） */
-  const roll = boFall((r0 - 70) / 80) * edge;
-  h += roll * (0.85 * Math.sin(x * 0.013) * Math.cos(z * 0.011)
-             + 0.55 * Math.sin((x * 0.7 + z) * 0.018 + 1.3)
-             + 0.30 * Math.cos((x - z * 0.6) * 0.030 + 0.7));
+  /* 1. 连续小波浪：波长 10 m，起伏 ±0.34 m */
+  h += 0.34 * Math.sin((x - 45) * Math.PI * 2 / 10) * boEnv(x, 45, 53, 104, 112);
 
-  /* 左后方大缓坡：最高的地形，可以绕上去俯射 */
-  h += k * boBump(x, z, -255, -95, 205, 155, 14.0, -0.24);
-  /* 右侧南北向长土垄：当掩体用 */
-  h += k * boBump(x, z, 300, 35, 76, 255, 9.5, 0.16);
-  /* 目标区右后的缓丘 */
-  h += k * boBump(x, z, 215, 315, 125, 115, 8.0, 0.0);
-  /* 靶道左侧的小高台 */
-  h += k * boBump(x, z, -125, 250, 82, 105, 7.5, -0.10);
-  /* 后方反坦克壕：横穿的长条负地形 */
-  h += k * boBump(x, z, 30, -235, 210, 30, -5.2, 0.09);
-  /* 右前方浅洼地 */
-  h += k * boBump(x, z, 155, 175, 92, 78, -3.2, 0.0);
-  /* 出生点右后方的小土包：练爬坡 */
-  h += k * boBump(x, z, 125, -55, 58, 72, 5.0, 0.35);
+  /* 2. 大起伏坡：两个 2.1 m 高的长坡 */
+  h += 2.1 * (0.5 - 0.5 * Math.cos((x - 118) * Math.PI * 2 / 26)) * boEnv(x, 118, 126, 164, 172);
+
+  /* 3. 单边坡道 + 平台：先爬 3 m 到平台，再从另一侧陡下 */
+  h += 3.0 * (boStep(178, 193, x) - boStep(211, 220, x));
+
+  /* 4. 减速带 ×3：半宽 2.2 m、高 0.40 m 的圆顶坎 */
+  for(const cx of [240, 248, 256]){
+    const u = (x - cx) / 2.2;
+    if(u > -1 && u < 1){
+      const c = Math.cos(u * Math.PI * 0.5);
+      h += 0.40 * c * c;
+    }
+  }
+  /* 4b. 0.5 m 台阶：2.5 m 短坡上去、2.5 m 短坡下来 */
+  h += 0.50 * (boStep(262, 264.5, x) - boStep(266, 268.5, x));
+
+  /* 5. 侧倾坡：横向正弦剖面，中线仍是 0，两侧最高 ±2 m */
+  h += 2.0 * Math.sin(Math.PI * z / (2 * LANE.halfW)) * boEnv(x, 276, 283, 299, 306);
 
   return h;
 }
 
-/* 白模地形网格：中心 10 m 网格，外圈按 640/760/1000/1350/1800/2400 m 渐疏，
-   一直到远山脚下，和原来的平面地面无缝衔接。 */
+function blockoutH(x, z){
+  if(x < LANE.x0 - 2 || x > LANE.x1 + 2 || Math.abs(z) > LANE.halfW + LANE.fade + 1) return 0;
+  /* 横向 9 m 内全高，9~12 m 平滑回落到 0 */
+  const az = Math.abs(z);
+  const mz = az <= LANE.halfW ? 1 : 1 - boFall((az - LANE.halfW) / LANE.fade);
+  /* 纵向两端也平滑收进平地 */
+  const mx = boStep(LANE.x0, LANE.x0 + 8, x) * (1 - boStep(LANE.x1 - 8, LANE.x1, x));
+  return laneH(x, z) * mz * mx;
+}
+
+/* 白模地形网格：测试道范围用 1 m 网格（x）/ 1.5 m 网格（z），
+   其余 10 m，外圈按 640/760/1000/1350/1800/2400 m 渐疏到远山脚下。 */
 function buildBlockoutTerrain(){
   if(MAP.ok) return null;
-  const HALF = 560, STEP = 10;
+  const HALF = 560;
   const OUT = [640, 760, 1000, 1350, 1800, 2400];
-  const coords = [];
-  for(let i = OUT.length - 1; i >= 0; i--) coords.push(-OUT[i]);
-  for(let v = -HALF; v <= HALF + 1e-6; v += STEP) coords.push(v);
-  for(let i = 0; i < OUT.length; i++) coords.push(OUT[i]);
 
-  const N = coords.length;
-  const pos = new Float32Array(N * N * 3);
-  const nrm = new Float32Array(N * N * 3);
+  const mkAxis = (fineA, fineB, fineStep) => {
+    const set = new Set();
+    for(let v = -HALF; v <= HALF + 1e-6; v += 10) set.add(+v.toFixed(2));
+    for(const v of OUT){ set.add(-v); set.add(v); }
+    for(let v = fineA; v <= fineB + 1e-6; v += fineStep) set.add(+v.toFixed(2));
+    return [...set].sort((a, b) => a - b);
+  };
+  const xs = mkAxis(LANE.x0 - 4, LANE.x1 + 4, 1.0);
+  const zs = mkAxis(-LANE.halfW - LANE.fade - 2, LANE.halfW + LANE.fade + 2, 1.5);
+  const NX = xs.length, NZ = zs.length;
+
+  const pos = new Float32Array(NX * NZ * 3);
+  const nrm = new Float32Array(NX * NZ * 3);
   const idx = [];
-  for(let j = 0; j < N; j++){
-    for(let i = 0; i < N; i++){
-      const x = coords[i], z = coords[j];
+  for(let j = 0; j < NZ; j++){
+    for(let i = 0; i < NX; i++){
+      const x = xs[i], z = zs[j];
       const h = blockoutH(x, z);
-      const o = (j * N + i) * 3;
+      const o = (j * NX + i) * 3;
       pos[o] = x; pos[o + 1] = h; pos[o + 2] = z;
-      const e = 2.0;
+      const e = 0.6;
       const dx = (blockoutH(x + e, z) - blockoutH(x - e, z)) / (2 * e);
       const dz = (blockoutH(x, z + e) - blockoutH(x, z - e)) / (2 * e);
       const inv = 1 / Math.hypot(dx, 1, dz);
       nrm[o] = -dx * inv; nrm[o + 1] = inv; nrm[o + 2] = -dz * inv;
     }
   }
-  for(let j = 0; j < N - 1; j++){
-    for(let i = 0; i < N - 1; i++){
-      const a = j * N + i, b = a + 1, c = a + N, d = c + 1;
+  for(let j = 0; j < NZ - 1; j++){
+    for(let i = 0; i < NX - 1; i++){
+      const a = j * NX + i, b = a + 1, c = a + NX, d = c + 1;
       idx.push(a, c, b, b, c, d);
     }
   }
 
-  const inter = new Float32Array(N * N * 6);
-  for(let i = 0; i < N * N; i++){
+  const inter = new Float32Array(NX * NZ * 6);
+  for(let i = 0; i < NX * NZ; i++){
     inter[i * 6]     = pos[i * 3];     inter[i * 6 + 1] = pos[i * 3 + 1]; inter[i * 6 + 2] = pos[i * 3 + 2];
     inter[i * 6 + 3] = nrm[i * 3];     inter[i * 6 + 4] = nrm[i * 3 + 1]; inter[i * 6 + 5] = nrm[i * 3 + 2];
   }
@@ -3245,6 +3298,7 @@ function buildBlockoutTerrain(){
   const ibo = gl.createBuffer();
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(idx), gl.STATIC_DRAW);
+  console.log(`  白模地形 ${NX}×${NZ} = ${(NX * NZ / 1000).toFixed(1)}k 顶点（测试道加密）`);
   return { vbo, ibo, count: idx.length };
 }
 
@@ -3268,6 +3322,16 @@ function groundSlope(x, z){
   const dx = (groundH(x + e, z) - groundH(x - e, z)) / (2 * e);
   const dz = (groundH(x, z + e) - groundH(x, z - e)) / (2 * e);
   return [dx, dz];
+}
+
+/* 地面法线：写进 out（避免每帧分配）。白模测试道特征比较细，步长取小一点 */
+function groundNormal(x, z, out){
+  const e = MAP.ok ? 3.0 : 0.55;
+  const dx = (groundH(x + e, z) - groundH(x - e, z)) / (2 * e);
+  const dz = (groundH(x, z + e) - groundH(x, z - e)) / (2 * e);
+  const inv = 1 / Math.hypot(dx, 1, dz);
+  out[0] = -dx * inv; out[1] = inv; out[2] = -dz * inv;
+  return out;
 }
 
 /* ---------------- 地形网格 ---------------- */
@@ -6203,6 +6267,470 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
   document.addEventListener('dblclick', e => e.preventDefault(), {passive:false});
 })();
 
+/* ===================== 69_physics.js ===================== */
+/* ============================ 车辆物理：刚体 + 射线悬挂 ============================ */
+/*  以前的车是「位置 + 偏航 + 速度」直接摆，贴地、无质量、不会腾空。
+    这里换成一套真正的受力模拟：
+      · 车体有质量、惯性、重力，位置/速度按 F=ma 积分
+      · 姿态 yaw / pitch / roll 也有角速度，由接触点力矩驱动（不是视觉弹簧）
+      · 4 个负重轮位置向下打射线，弹簧 + 阻尼把车撑在地面上
+      · 左右履带分别给驱动 / 制动 / 滚阻力，受附着力 (μN) 限制
+      · 横向摩擦阻止侧滑，转弯时车体自然外倾、刹车时自然点头
+      · 上坡、下坡、过坎、从平台冲出去腾空落地，全靠同一套力
+    渲染仍然用 car.pos / car.yaw / car.pitch / car.roll，所以 80_render 不用改。
+
+    车型差异来自模型 meta：
+      · trackW        —— 履带中心距
+      · wheels[].c    —— 负重轮位置（取最前/最后两个当悬挂点）
+      · wheels[].c[1] —— 负重轮轴高（决定悬挂静止长度）
+      · bbox          —— 车体尺寸（算转动惯量）
+      · VEH.maxSpeed / reverseSpeed / turnRate —— 发动机与转向上限
+    质量在公式里基本被约掉（弹簧/牵引力都按质量缩放），所以不用给每辆车
+    单独填吨位；真正决定手感的是尺寸、速度、转向率和悬挂频率。            */
+
+const PHYS = {
+  ready: false,
+  id: '', meta: null,
+  mass: 40,                 // 吨
+  comH: 1.0,                // 质心高度（模型局部，履带底面为 0）
+  halfW: 1.15,              // 履带中心到中线
+  axleF: 2.0, axleR: -2.0,  // 前/后悬挂点
+  anchorY: 0.30,            // 悬挂点高度（模型局部）
+  L0: 0.44,                 // 悬挂自由长度
+  k: 900, damp: 100,        // 弹簧刚度 / 阻尼（kN/m, kN·s/m）
+  maxLoad: 700,             // 单轮最大支撑力（kN）
+  Ipitch: 260, Iroll: 110, Iyaw: 260,
+  pos: [0, 0, 0], vel: [0, 0, 0],
+  yaw: 0, pitch: 0, roll: 0,
+  yawRate: 0, pitchRate: 0, rollRate: 0,
+  trackV: 0,                // 履带目标速度（一阶滤波）
+  travelL: 0, travelR: 0,
+  wheels: [],
+  lastOx: 0, lastOz: 0, lastYaw: 0,
+};
+
+const P_EPS = 1e-9;
+
+function pc(v, a, b){ return v < a ? a : (v > b ? b : v); }
+
+/* 由 yaw / pitch / roll 求车体三轴（与 entityMats 的 Ry·Rx·Rz 完全一致） */
+function physBasis(out){
+  const cy = Math.cos(PHYS.yaw), sy = Math.sin(PHYS.yaw);
+  const cp = Math.cos(PHYS.pitch), sp = Math.sin(PHYS.pitch);
+  const cr = Math.cos(PHYS.roll), sr = Math.sin(PHYS.roll);
+  out = out || [[0,0,0],[0,0,0],[0,0,0]];
+  /* fwd = R*(0,0,1) */
+  out[0][0] = sy * cp;  out[0][1] = -sp;  out[0][2] = cy * cp;
+  /* rgt = R*(1,0,0)（模型 +X） */
+  out[1][0] = cy * cr + sy * sp * sr;
+  out[1][1] = cp * sr;
+  out[1][2] = -sy * cr + cy * sp * sr;
+  /* up = R*(0,1,0) */
+  out[2][0] = -cy * sr + sy * sp * cr;
+  out[2][1] = cp * cr;
+  out[2][2] = sy * sr + cy * sp * cr;
+  return out;
+}
+
+/* 模型局部点 → 世界坐标（不含质心偏移） */
+function physPoint(b, lx, ly, lz, out){
+  out = out || [0,0,0];
+  out[0] = PHYS.pos[0] + b[1][0]*lx + b[2][0]*ly + b[0][0]*lz;
+  out[1] = PHYS.pos[1] + b[1][1]*lx + b[2][1]*ly + b[0][1]*lz;
+  out[2] = PHYS.pos[2] + b[1][2]*lx + b[2][2]*ly + b[0][2]*lz;
+  return out;
+}
+
+/* 车辆原点（履带底面中心）= 质心 - up*comH */
+function physOrigin(b, out){
+  out = out || [0,0,0];
+  out[0] = PHYS.pos[0] - b[2][0] * PHYS.comH;
+  out[1] = PHYS.pos[1] - b[2][1] * PHYS.comH;
+  out[2] = PHYS.pos[2] - b[2][2] * PHYS.comH;
+  return out;
+}
+
+function physSetup(){
+  const meta = (USE_MODEL && MODEL && MODEL.meta) ? MODEL.meta : null;
+  const V = (typeof VEH !== 'undefined' && VEH) ? VEH : (VEHICLES && VEHICLES.bmpt) || {};
+  PHYS.meta = meta;
+  PHYS.id = SELECTED_ID || '';
+
+  const trackW = (meta && meta.trackW) || TRACK_W || 2.3;
+  PHYS.halfW = Math.max(0.7, trackW * 0.5);
+
+  let front = 2.0, rear = -2.0, anchorY = 0.30;
+  if(meta && meta.wheels && meta.wheels.length){
+    let fz = -1e9, rz = 1e9, ay = 1e9, n = 0;
+    for(const w of meta.wheels){
+      if(!w || !w.c) continue;
+      if(Math.abs(w.c[0]) < trackW * 0.22) continue;
+      if(w.c[1] > 1.25) continue;
+      if(w.c[2] > fz) fz = w.c[2];
+      if(w.c[2] < rz) rz = w.c[2];
+      if(w.c[1] < ay) ay = w.c[1];
+      n++;
+    }
+    if(n > 0){ front = fz; rear = rz; anchorY = ay; }
+  }
+  if(front - rear < 2.0){ front = 1.6; rear = -1.6; }
+  PHYS.axleF = front;
+  PHYS.axleR = rear;
+  PHYS.anchorY = Math.max(0.16, Math.min(0.70, anchorY));
+  /* 静止时弹簧压 0.10 m，车体原点比地面高约 0.04 m（和旧版视觉一致） */
+  PHYS.L0 = PHYS.anchorY + 0.14;
+
+  /* 尺寸 / 质量 / 惯量 */
+  let bb = (meta && meta.bbox) || [[-1.7, 0, -3.0], [1.7, 2.6, 3.0]];
+  const w = pc(bb[1][0] - bb[0][0], 2.0, 4.4);
+  const l = pc((bb[1][2] - bb[0][2]) * 0.92, 3.8, 9.4);
+  const hh = pc(bb[1][1] - bb[0][1], 1.2, 2.6);
+  PHYS.mass = pc(w * l * hh * 0.34, 12, 70);
+
+  PHYS.comH = pc(hh * 0.40, 0.75, 1.25);
+  PHYS.Ipitch = PHYS.mass / 12 * (l * l + hh * hh) * 1.85;
+  PHYS.Iroll  = PHYS.mass / 12 * (w * w + hh * hh) * 2.10;
+  PHYS.Iyaw   = PHYS.mass / 12 * (w * w + l * l) * 1.50;
+
+  const c0 = 0.10;
+  PHYS.k = PHYS.mass * 9.81 / (4 * c0);
+  PHYS.damp = Math.sqrt(PHYS.k * PHYS.mass) * 0.60;
+  PHYS.maxLoad = PHYS.mass * 9.81 * 2.0;
+
+  PHYS.wheels = [
+    { lx: -PHYS.halfW, lz: PHYS.axleF, side: -1 },
+    { lx:  PHYS.halfW, lz: PHYS.axleF, side:  1 },
+    { lx: -PHYS.halfW, lz: PHYS.axleR, side: -1 },
+    { lx:  PHYS.halfW, lz: PHYS.axleR, side:  1 },
+  ];
+
+  console.log(`  物理：${PHYS.id || '?'}  ${PHYS.mass.toFixed(1)} t  ` +
+              `轴距 ${(front - rear).toFixed(2)} m  轮距 ${(trackW).toFixed(2)} m  ` +
+              `重心 ${PHYS.comH.toFixed(2)} m`);
+}
+
+/* 把当前 car 状态当成初值（出生 / 重生 / 瞬移 / 换车） */
+function physReset(){
+  const gy = groundH(car.pos[0], car.pos[2]);
+  car.pos[1] = gy;
+  PHYS.pos[0] = car.pos[0];
+  PHYS.pos[1] = gy + PHYS.comH + 0.04;
+  PHYS.pos[2] = car.pos[2];
+  PHYS.vel[0] = PHYS.vel[1] = PHYS.vel[2] = 0;
+  PHYS.yaw = car.yaw || 0;
+  PHYS.pitch = 0;
+  PHYS.roll = 0;
+  PHYS.yawRate = PHYS.pitchRate = PHYS.rollRate = 0;
+  PHYS.trackV = 0;
+  PHYS.travelL = PHYS.travelR = 0;
+  PHYS.lastOx = car.pos[0];
+  PHYS.lastOz = car.pos[2];
+  PHYS.lastYaw = PHYS.yaw;
+  PHYS.ready = true;
+}
+
+/* 把物理状态写回 car（渲染 / HUD / 音效 / 相机都读这些） */
+function physSync(b){
+  b = b || physBasis();
+  const o = physOrigin(b);
+  car.pos[0] = o[0];
+  car.pos[1] = o[1];
+  car.pos[2] = o[2];
+  car.yaw = PHYS.yaw;
+  car.pitch = PHYS.pitch;
+  car.roll = PHYS.roll;
+  car.yawRate = PHYS.yawRate;
+
+  const vF = PHYS.vel[0]*b[0][0] + PHYS.vel[1]*b[0][1] + PHYS.vel[2]*b[0][2];
+  const half = PHYS.yawRate * PHYS.halfW;
+  car.v = vF;
+  car.vL = vF - half;
+  car.vR = vF + half;
+  car.travelL = PHYS.travelL;
+  car.travelR = PHYS.travelR;
+  car.prevV = vF;
+
+  PHYS.lastOx = car.pos[0];
+  PHYS.lastOz = car.pos[2];
+  PHYS.lastYaw = PHYS.yaw;
+}
+
+/* 联机推挤 / 建筑碰撞：直接平移刚体并给一点速度 */
+function physPush(dx, dz){
+  if(!PHYS.ready) return;
+  PHYS.pos[0] += dx;
+  PHYS.pos[2] += dz;
+  PHYS.vel[0] += dx * 1.5;
+  PHYS.vel[2] += dz * 1.5;
+  physSync();
+}
+
+/* 阵亡 / 重生：把水平速度清零（垂直速度留着，空中阵亡就自然落地） */
+function physHalt(){
+  PHYS.vel[0] = 0;
+  PHYS.vel[2] = 0;
+  PHYS.yawRate = PHYS.pitchRate = PHYS.rollRate = 0;
+  PHYS.trackV = 0;
+  PHYS.pitch = 0; PHYS.roll = 0;
+  PHYS.lastOx = car.pos[0];
+  PHYS.lastOz = car.pos[2];
+  PHYS.lastYaw = car.yaw;
+}
+
+/* ---------------------------------------------------------------- 单个物理步 */
+const _b = [[0,0,0],[0,0,0],[0,0,0]];
+const _n = [0,1,0];
+const _r = [0,0,0];
+const _vc = [0,0,0];
+const _tf = [0,0,0];
+const _side = [0,0,0];
+const _H = [0,0,0];
+
+function physSub(h, thr, str){
+  const V = (typeof VEH !== 'undefined' && VEH) ? VEH : (VEHICLES && VEHICLES.bmpt) || {};
+  const b = physBasis(_b);
+  const fwd = b[0], rgt = b[1], up = b[2];
+  const m = PHYS.mass;
+  const o = physOrigin(b);
+
+  let Fx = 0, Fy = -m * 9.81, Fz = 0;
+  let Tx = 0, Ty = 0, Tz = 0;
+
+  /* 履带目标速度：一阶滤波，避免松手瞬间反向 */
+  const maxS = V.maxSpeed || 15;
+  const revS = V.reverseSpeed || 6.5;
+  const wantV = thr >= 0 ? thr * maxS : thr * revS;
+  PHYS.trackV += (wantV - PHYS.trackV) * Math.min(1, h * 7.0);
+
+  /* 角速度矢量：yaw 绕 up，pitch 绕 rgt，roll 绕 fwd */
+  const wx = up[0]*PHYS.yawRate + rgt[0]*PHYS.pitchRate + fwd[0]*PHYS.rollRate;
+  const wy = up[1]*PHYS.yawRate + rgt[1]*PHYS.pitchRate + fwd[1]*PHYS.rollRate;
+  const wz = up[2]*PHYS.yawRate + rgt[2]*PHYS.pitchRate + fwd[2]*PHYS.rollRate;
+
+  let nContact = 0;
+  let vLongL = 0, vLongR = 0, nL = 0, nR = 0;
+  let loadSum = 0;
+
+  for(const w of PHYS.wheels){
+    /* 悬挂点：局部 (lx, anchorY, lz) → 世界，ray 竖直向下 */
+    const ax = o[0] + rgt[0]*w.lx + up[0]*PHYS.anchorY + fwd[0]*w.lz;
+    const ay = o[1] + rgt[1]*w.lx + up[1]*PHYS.anchorY + fwd[1]*w.lz;
+    const az = o[2] + rgt[2]*w.lx + up[2]*PHYS.anchorY + fwd[2]*w.lz;
+
+    const g = groundH(ax, az);
+    let d = ay - g;
+    if(d > PHYS.L0) continue;                    // 轮子离地
+
+    let c = PHYS.L0 - d;
+    if(c < 0) c = 0;
+    if(c > PHYS.L0 * 1.25) c = PHYS.L0 * 1.25;   // 已经陷进地里的极端情况
+
+    groundNormal(ax, az, _n);
+    if(_n[1] < 0.30){ _n[1] = 0.30; }             // 别把陡壁当成地面
+    const invN = 1 / Math.hypot(_n[0], _n[1], _n[2]);
+    _n[0] *= invN; _n[1] *= invN; _n[2] *= invN;
+
+    _H[0] = ax; _H[1] = g; _H[2] = az;
+    _r[0] = _H[0] - PHYS.pos[0];
+    _r[1] = _H[1] - PHYS.pos[1];
+    _r[2] = _H[2] - PHYS.pos[2];
+
+    /* 接触点速度 = 线速度 + ω×r */
+    _vc[0] = PHYS.vel[0] + wy*_r[2] - wz*_r[1];
+    _vc[1] = PHYS.vel[1] + wz*_r[0] - wx*_r[2];
+    _vc[2] = PHYS.vel[2] + wx*_r[1] - wy*_r[0];
+    const vN = _vc[0]*_n[0] + _vc[1]*_n[1] + _vc[2]*_n[2];
+
+    let Fs = PHYS.k * c - PHYS.damp * vN;
+    if(Fs < 0) Fs = 0;
+    if(Fs > PHYS.maxLoad) Fs = PHYS.maxLoad;
+
+    Fx += _n[0] * Fs; Fy += _n[1] * Fs; Fz += _n[2] * Fs;
+    Tx += _r[1]*_n[2]*Fs - _r[2]*_n[1]*Fs;
+    Ty += _r[2]*_n[0]*Fs - _r[0]*_n[2]*Fs;
+    Tz += _r[0]*_n[1]*Fs - _r[1]*_n[0]*Fs;
+
+    nContact++;
+    loadSum += Fs;
+
+    /* ---- 履带牵引 / 侧向摩擦 ---- */
+    const nDotF = _n[0]*fwd[0] + _n[1]*fwd[1] + _n[2]*fwd[2];
+    _tf[0] = fwd[0] - _n[0]*nDotF;
+    _tf[1] = fwd[1] - _n[1]*nDotF;
+    _tf[2] = fwd[2] - _n[2]*nDotF;
+    const tfl = Math.hypot(_tf[0], _tf[1], _tf[2]);
+    if(tfl < 0.20) continue;                      // 车体几乎立起来，没有有效前进方向
+    _tf[0] /= tfl; _tf[1] /= tfl; _tf[2] /= tfl;
+
+    _side[0] = _n[1]*_tf[2] - _n[2]*_tf[1];
+    _side[1] = _n[2]*_tf[0] - _n[0]*_tf[2];
+    _side[2] = _n[0]*_tf[1] - _n[1]*_tf[0];
+    const sl = Math.hypot(_side[0], _side[1], _side[2]) || 1;
+    _side[0] /= sl; _side[1] /= sl; _side[2] /= sl;
+
+    const vLong = _vc[0]*_tf[0] + _vc[1]*_tf[1] + _vc[2]*_tf[2];
+    const vLat  = _vc[0]*_side[0] + _vc[1]*_side[1] + _vc[2]*_side[2];
+
+    if(w.side > 0){ vLongL += vLong; nL++; } else { vLongR += vLong; nR++; }
+
+    const lim = Fs * 1.15;                        // μN：附着力上限
+    let fl;
+    if(Math.abs(thr) < 0.06){
+      fl = -vLong * m * 1.15;                     // 松油门：刹车
+    } else if(thr * vLong < -0.2 && Math.abs(vLong) > 1.6){
+      fl = -Math.sign(vLong) * m * 1.05;          // 反打方向：先刹住再反向
+    } else {
+      fl = (PHYS.trackV - vLong) * m * 0.55;      // 驱动
+    }
+    fl = pc(fl, -m * 1.15, m * 1.15);
+    fl -= vLong * m * 0.045;                      // 滚阻
+    if(fl > lim) fl = lim; else if(fl < -lim) fl = -lim;
+
+    let fs = -vLat * m * 0.85;                    // 横向：履带抗侧滑
+    if(fs > lim) fs = lim; else if(fs < -lim) fs = -lim;
+
+    const fx = _tf[0]*fl + _side[0]*fs;
+    const fy = _tf[1]*fl + _side[1]*fs;
+    const fz = _tf[2]*fl + _side[2]*fs;
+    Fx += fx; Fy += fy; Fz += fz;
+    Tx += _r[1]*fz - _r[2]*fy;
+    Ty += _r[2]*fx - _r[0]*fz;
+    Tz += _r[0]*fy - _r[1]*fx;
+  }
+
+  /* ---- 驻车：松油门且基本停住时，抵消重力沿坡的分量 ----
+     这是履带驻车制动，作用在质心上，不产生力矩，所以不会妨碍原地转向。 */
+  if(Math.abs(thr) < 0.06){
+    const hs = Math.hypot(PHYS.vel[0], PHYS.vel[2]);
+    if(hs < 1.6){
+      const e = 0.7;
+      const sx = (groundH(PHYS.pos[0] + e, PHYS.pos[2]) - groundH(PHYS.pos[0] - e, PHYS.pos[2])) / (2*e);
+      const sz = (groundH(PHYS.pos[0], PHYS.pos[2] + e) - groundH(PHYS.pos[0], PHYS.pos[2] - e)) / (2*e);
+      let hx = m * 9.81 * sx, hz = m * 9.81 * sz;
+      const hl = Math.hypot(hx, hz), hmax = m * 9.81 * 0.95;
+      if(hl > hmax){ const s = hmax / hl; hx *= s; hz *= s; }
+      Fx += hx - PHYS.vel[0] * m * 2.5;
+      Fz += hz - PHYS.vel[2] * m * 2.5;
+    }
+  }
+
+  /* ---- 转向：履带差速的等效偏航力矩（有角惯性，不是直接改朝向） ---- */
+  if(nContact > 0){
+    const vF = PHYS.vel[0]*fwd[0] + PHYS.vel[2]*fwd[2];
+    const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
+    const turnT = str * (V.turnRate || 2.2) * 0.55 * (1 - 0.60 * spdK);
+    const tauMax = PHYS.Iyaw * 2.4;
+    let tau = (turnT - PHYS.yawRate) * PHYS.Iyaw * 6.0;
+    if(tau > tauMax) tau = tauMax; else if(tau < -tauMax) tau = -tauMax;
+    Tx += up[0] * tau; Ty += up[1] * tau; Tz += up[2] * tau;
+  }
+
+  /* ---- 积分 ---- */
+  const ih = h / m;
+  PHYS.vel[0] += Fx * ih;
+  PHYS.vel[1] += Fy * ih;
+  PHYS.vel[2] += Fz * ih;
+  PHYS.pos[0] += PHYS.vel[0] * h;
+  PHYS.pos[1] += PHYS.vel[1] * h;
+  PHYS.pos[2] += PHYS.vel[2] * h;
+
+  let tP = (Tx*rgt[0] + Ty*rgt[1] + Tz*rgt[2]) / PHYS.Ipitch;
+  let tR = (Tx*fwd[0] + Ty*fwd[1] + Tz*fwd[2]) / PHYS.Iroll;
+  let tY = (Tx*up[0]  + Ty*up[1]  + Tz*up[2])  / PHYS.Iyaw;
+
+  PHYS.pitchRate += tP * h;
+  PHYS.rollRate  += tR * h;
+  PHYS.yawRate   += tY * h;
+
+  /* 一点点姿态阻尼，防止弹簧在硬坎上来回振 */
+  PHYS.pitchRate *= Math.max(0, 1 - 0.55 * h);
+  PHYS.rollRate  *= Math.max(0, 1 - 0.55 * h);
+
+  PHYS.yaw += PHYS.yawRate * h;
+  PHYS.pitch += PHYS.pitchRate * h;
+  PHYS.roll  += PHYS.rollRate * h;
+
+  /* 不追求翻车：翻过这个角度就顶住并吃掉角速度（坦克也翻不了） */
+  if(PHYS.pitch > 0.62){ PHYS.pitch = 0.62; if(PHYS.pitchRate > 0) PHYS.pitchRate = 0; }
+  if(PHYS.pitch < -0.62){ PHYS.pitch = -0.62; if(PHYS.pitchRate < 0) PHYS.pitchRate = 0; }
+  if(PHYS.roll > 0.58){ PHYS.roll = 0.58; if(PHYS.rollRate > 0) PHYS.rollRate = 0; }
+  if(PHYS.roll < -0.58){ PHYS.roll = -0.58; if(PHYS.rollRate < 0) PHYS.rollRate = 0; }
+
+  /* ---- 车体别插进地里（车头扎进坡、骑在坎上、翻坡时兜底） ---- */
+  const b2 = physBasis(_b);
+  const o2 = physOrigin(b2);
+  const hw = PHYS.halfW * 0.98;
+  let pen = 0;
+  for(let k = 0; k < 6; k++){
+    let lx, lz;
+    if(k === 0){ lx = 0; lz = 0; }
+    else if(k === 1){ lx = -hw; lz = PHYS.axleF + 0.35; }
+    else if(k === 2){ lx =  hw; lz = PHYS.axleF + 0.35; }
+    else if(k === 3){ lx = -hw; lz = PHYS.axleR - 0.35; }
+    else if(k === 4){ lx =  hw; lz = PHYS.axleR - 0.35; }
+    else { lx = 0; lz = PHYS.axleR - 0.35; }
+    const px = o2[0] + b2[1][0]*lx + b2[0][0]*lz;
+    const py = o2[1] + b2[1][1]*lx + b2[0][1]*lz;
+    const pz = o2[2] + b2[1][2]*lx + b2[0][2]*lz;
+    const gg = groundH(px, pz);
+    if(gg - py > pen) pen = gg - py;
+  }
+  if(pen > 0.05){
+    PHYS.pos[1] += pen * 0.70;
+    if(PHYS.vel[1] < 0) PHYS.vel[1] *= 0.25;
+    PHYS.pitchRate *= 0.85;
+    PHYS.rollRate *= 0.85;
+  }
+
+  /* 极端数值兜底 */
+  const sp2 = PHYS.vel[0]*PHYS.vel[0] + PHYS.vel[1]*PHYS.vel[1] + PHYS.vel[2]*PHYS.vel[2];
+  if(sp2 > 3600){
+    const s = 60 / Math.sqrt(sp2);
+    PHYS.vel[0] *= s; PHYS.vel[1] *= s; PHYS.vel[2] *= s;
+  }
+
+  /* 履带里程（渲染履带/负重轮转动） */
+  PHYS.travelL += (nL ? vLongL / nL : PHYS.trackV) * h;
+  PHYS.travelR += (nR ? vLongR / nR : PHYS.trackV) * h;
+}
+
+/* ---------------------------------------------------------------- 对外入口 */
+/*  updateSim 每帧调用一次：
+      dt   —— 帧间隔
+      thr  —— -1..1（负数是倒车）
+      str  —— -1..1（正数向左 / A 键）                                     */
+function physStep(dt, thr, str){
+  const meta = (USE_MODEL && MODEL && MODEL.meta) ? MODEL.meta : null;
+  if(!PHYS.ready || PHYS.meta !== meta || PHYS.id !== (SELECTED_ID || '')){
+    physSetup();
+    physReset();
+  }
+
+  /* 出生 / 重生 / 联机瞬移：car.pos 被外部直接改了，物理状态跟着重置 */
+  const dx = car.pos[0] - PHYS.lastOx, dz = car.pos[2] - PHYS.lastOz;
+  if(dx*dx + dz*dz > 9.0 || Math.abs(wrapPi(car.yaw - PHYS.lastYaw)) > 0.6){
+    physReset();
+  }
+
+  if(dt <= 0) return;
+  if(dt > 0.12) dt = 0.12;
+  const n = Math.max(1, Math.min(6, Math.ceil(dt / (1 / 120))));
+  const h = dt / n;
+  for(let i = 0; i < n; i++) physSub(h, thr, str);
+
+  const b = physBasis(_b);
+  physSync(b);
+
+  /* 地图模式：建筑碰撞（白模场没有建筑，不走这里） */
+  if(MAP.ok){
+    const hit = mapCollide(car.pos[0], car.pos[2], 1.9);
+    if(hit){
+      physPush(hit.dx, hit.dz);
+      PHYS.vel[0] *= 0.4; PHYS.vel[2] *= 0.4;
+    }
+  }
+}
+
 /* ===================== 70_sim.js ===================== */
 /* ============================ 更新 ============================ */
 const SUN = norm3([0.58, 0.375, 0.72]);
@@ -6361,59 +6889,21 @@ function updateSim(t, dt){
   }
 
   const {thr, str} = wishInput();
+  const V = VEH || VEHICLES.bmpt;
   if(cruiseFlash > 0) cruiseFlash = Math.max(0, cruiseFlash - dt);
 
   // 鼠标在屏幕上的归一化位置（-1..1）
   mouseNX = (mouseX / Math.max(1, innerWidth)) * 2 - 1;
   mouseNY = 1 - (mouseY / Math.max(1, innerHeight)) * 2;
 
-  // 纵向：先决定车体中央速度，再叠加履带差速
-  const V = VEH || VEHICLES.bmpt;
-  const base = thr >= 0 ? thr * V.maxSpeed : thr * V.reverseSpeed;
-  car.v = approachV(car.v, base, dt);
-
-  // 转向：直接给偏航角速度。低速仍能原地转，高速时略收敛
-  const spdK = Math.min(1.0, Math.abs(car.v) / V.maxSpeed);
-  const yawT = str * V.turnRate * (0.62 + 0.38 * spdK);
-  car.yawRate += (yawT - car.yawRate) * Math.min(1, dt * 6.0);
-
-  // 由偏航角速度反推两侧履带速度
-  const half = car.yawRate * TRACK_W * 0.5;
-  car.vL = clamp(car.v - half, -V.reverseSpeed, V.maxSpeed);
-  car.vR = clamp(car.v + half, -V.reverseSpeed, V.maxSpeed);
-
-  const v = (car.vL + car.vR) * 0.5;
-  const yawRate = car.yawRate;
-  car.yaw += yawRate * dt;
-  car.pos[0] += Math.sin(car.yaw) * v * dt;
-  car.pos[2] += Math.cos(car.yaw) * v * dt;
+  // 物理：刚体 + 4 点射线悬挂（见 69_physics.js）
+  // thr/str 已经在 wishInput() 里处理过：选车界面、阵亡、触屏都返回 0
+  physStep(dt, thr, str);
 
   /* 联机：被其他玩家的车顶开（每边都推自己，合成后就是互相挤开） */
   if(NET.on) netCollideSelf();
 
-  car.travelL += car.vL * dt;
-  car.travelR += car.vR * dt;
-
-  // 视觉俯仰 / 侧倾（加速度 + 地形坡度）
-  const acc = (v - car.prevV) / Math.max(dt, 1e-4);
-  car.prevV = v;
-  let pitchT = clamp(-acc * 0.0075, -0.055, 0.055);
-  let rollT  = clamp( v * yawRate * 0.0075, -0.05, 0.05);
-  car.pos[1] = groundH(car.pos[0], car.pos[2]);
-  const [sx, sz] = groundSlope(car.pos[0], car.pos[2]);
-  const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
-  const rx = Math.cos(car.yaw), rz = -Math.sin(car.yaw);
-  pitchT += clamp(-(sx * fx + sz * fz), -0.26, 0.26);
-  rollT  += clamp( (sx * rx + sz * rz), -0.26, 0.26);
-  if(MAP.ok){
-    /* 建筑碰撞：把车推出去 */
-    const hit = mapCollide(car.pos[0], car.pos[2], 1.9);
-    if(hit){ car.pos[0] += hit.dx; car.pos[2] += hit.dz; }
-  }
-  car.pitchV += ((pitchT - car.pitch) * 110 - car.pitchV * 16) * dt;
-  car.pitch  += car.pitchV * dt;
-  car.rollV  += ((rollT - car.roll) * 110 - car.rollV * 16) * dt;
-  car.roll   += car.rollV * dt;
+  const v = (car.vL + car.vR) * 0.5;
 
   // ---- 炮塔 / 火炮 ----
   if(!STARTED){
@@ -6866,6 +7356,23 @@ function drawMinimap(){
       g.moveTo(sx(b.pts[0][0]), sz(b.pts[0][1]));
       for(let i = 1; i < b.pts.length; i++) g.lineTo(sx(b.pts[i][0]), sz(b.pts[i][1]));
       g.closePath(); g.fill();
+    }
+  }
+
+  if(!MAP.ok){
+    /* 小地图上标出测试道和分段线，方便找 */
+    const lx0 = sx(LANE.x0), lx1 = sx(LANE.x1);
+    const lz0 = sz(-LANE.halfW), lz1 = sz(LANE.halfW);
+    const ly = Math.min(lz0, lz1), lh = Math.abs(lz1 - lz0);
+    g.fillStyle = 'rgba(214,218,204,.09)';
+    g.fillRect(lx0, ly, lx1 - lx0, lh);
+    g.strokeStyle = 'rgba(214,218,204,.22)';
+    g.lineWidth = 1;
+    g.strokeRect(lx0 + 0.5, ly + 0.5, lx1 - lx0 - 1, lh - 1);
+    g.fillStyle = 'rgba(232,198,110,.45)';
+    for(const mx of [LANE.x0, 112, 172, 220, 269, LANE.x1]){
+      const x = sx(mx);
+      g.fillRect(x - 0.5, ly, 1, lh);
     }
   }
 
@@ -8276,11 +8783,12 @@ goEl.addEventListener('click', () => { netOpenLobby(); });   // 「进入测试�
       - 车型数据仍在同源 data/veh/<id>.js 里按需注入，不通过 DataChannel 传
       - 没联机时这段代码完全不碰网络，单人行为和以前一样
 
-    状态包 40 字节（小端）：
+    状态包 56 字节（小端）：
       0 u8 type=1 | 1 u8 slot | 2 u32 发送时刻
       6 f32 x | 10 f32 y | 14 f32 z
       18 f32 yaw | 22 f32 turret | 26 f32 gun
-      30 f32 travelL | 34 f32 travelR | 38 u8 flags | 39 u8 ver            */
+      30 f32 travelL | 34 f32 travelR | 38 u8 flags | 39 u8 ver
+      40 f32 mgYaw | 44 f32 mgPitch | 48 f32 pitch | 52 f32 roll        */
 
 const NET_PREFIX  = 'cdmyx-';
 const NET_MAX     = 4;          // 房间人数上限（含房主）
@@ -9206,6 +9714,7 @@ function netDie(byName){
   NET.deadT = 0;
   NET.lastKiller = byName || '';
   car.v = 0; car.yawRate = 0; car.vL = car.vR = 0;
+  if(typeof physHalt === 'function') physHalt();
   input.fire = false;
   netBlowUp(car.pos);
   renderNetPanel();
@@ -9220,6 +9729,7 @@ function netRespawn(){
   NET.spawnT = 0;
   /* 原地复活：位置不动，只清速度 */
   car.v = 0; car.yawRate = 0; car.vL = car.vR = 0;
+  if(typeof physHalt === 'function') physHalt();
   input.fire = false;
   if(NET.on){
     if(NET.role === 'host'){
@@ -9292,8 +9802,8 @@ function netCollideSelf(){
   }
 
   if(pen <= 0) return;
-  car.pos[0] += nx * pen * 0.55;
-  car.pos[2] += nz * pen * 0.55;
+  if(typeof physPush === 'function') physPush(nx * pen * 0.55, nz * pen * 0.55);
+  else { car.pos[0] += nx * pen * 0.55; car.pos[2] += nz * pen * 0.55; }
 
   const sp = Math.abs(car.v);
   if(sp > 1.2){
@@ -9500,7 +10010,7 @@ function netStartSending(){
 function netSendState(){
   if(!NET.on || !NET.started) return;
 
-  const b = new ArrayBuffer(48);
+  const b = new ArrayBuffer(56);
   const dv = new DataView(b);
   dv.setUint8(0, 1);
   dv.setUint8(1, NET.slot);
@@ -9515,8 +10025,10 @@ function netSendState(){
   dv.setFloat32(34, car.travelR, true);
   dv.setFloat32(40, MG ? mg.yaw   : 0, true);
   dv.setFloat32(44, MG ? mg.pitch : 0, true);
+  dv.setFloat32(48, car.pitch || 0, true);
+  dv.setFloat32(52, car.roll || 0, true);
   dv.setUint8(38, 1);
-  dv.setUint8(39, 1);
+  dv.setUint8(39, 2);
 
   if(NET.role === 'host'){
     for(const c of NET.conns.values()){ try{ c.send(b); }catch(e){} }
@@ -9532,11 +10044,15 @@ function netDecode(dv, slot){
     x: dv.getFloat32(6, true), y: dv.getFloat32(10, true), z: dv.getFloat32(14, true),
     yaw: dv.getFloat32(18, true), turret: dv.getFloat32(22, true), gun: dv.getFloat32(26, true),
     travelL: dv.getFloat32(30, true), travelR: dv.getFloat32(34, true),
-    mgYaw: 0, mgPitch: 0,
+    mgYaw: 0, mgPitch: 0, pitch: 0, roll: 0,
   };
   if(dv.byteLength >= 48){
     s.mgYaw   = dv.getFloat32(40, true);
     s.mgPitch = dv.getFloat32(44, true);
+  }
+  if(dv.byteLength >= 56){
+    s.pitch = dv.getFloat32(48, true);
+    s.roll  = dv.getFloat32(52, true);
   }
   return s;
 }
@@ -9585,6 +10101,7 @@ function netApplySnap(s){
     yaw: s.yaw, turret: s.turret, gun: s.gun,
     travelL: s.travelL, travelR: s.travelR,
     mgYaw: s.mgYaw || 0, mgPitch: s.mgPitch || 0,
+    pitch: s.pitch || 0, roll: s.roll || 0,
   });
 
   netEnsureModel(e);
@@ -9656,7 +10173,8 @@ function netSample(e, rt){
   if(a === c || c.rt <= a.rt){
     return { x: a.x, y: a.y, z: a.z, yaw: a.yaw, turret: a.turret, gun: a.gun,
              travelL: a.travelL, travelR: a.travelR,
-             mgYaw: a.mgYaw || 0, mgPitch: a.mgPitch || 0 };
+             mgYaw: a.mgYaw || 0, mgPitch: a.mgPitch || 0,
+             pitch: a.pitch || 0, roll: a.roll || 0 };
   }
   const u = Math.min(1, Math.max(0, (rt - a.rt) / (c.rt - a.rt)));
   return {
@@ -9670,6 +10188,8 @@ function netSample(e, rt){
     travelR: a.travelR + (c.travelR - a.travelR) * u,
     mgYaw: lerpAng(a.mgYaw || 0, c.mgYaw || 0, u),
     mgPitch: (a.mgPitch || 0) + ((c.mgPitch || 0) - (a.mgPitch || 0)) * u,
+    pitch: (a.pitch || 0) + ((c.pitch || 0) - (a.pitch || 0)) * u,
+    roll: (a.roll || 0) + ((c.roll || 0) - (a.roll || 0)) * u,
   };
 }
 
@@ -9693,7 +10213,7 @@ function drawRemotes(pr, trackPr){
     const pg = (meta && meta.pivotGun)    || [0, 1.9, 0.8];
     const mp = meta && meta.mgPivot;
     const V = VEHICLES[e.veh] || {};
-    const mats = entityMats([s.x, s.y, s.z], s.yaw, 0, 0, s.turret, s.gun, pt, pg,
+    const mats = entityMats([s.x, s.y, s.z], s.yaw, s.pitch || 0, s.roll || 0, s.turret, s.gun, pt, pg,
                             mp, s.mgYaw || 0, s.mgPitch || 0);
 
     if(pr === pDepth) drawModelDepth(P, mats, s.travelL, s.travelR);
