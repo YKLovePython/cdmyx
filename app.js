@@ -615,17 +615,19 @@ void main(){
 /* ---- 地形 ---- */
 const VS_TERRAIN = `
 layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNrm;
 uniform mat4 uVP, uLightVPNear, uLightVPFar;
-out vec3 vPos; out vec4 vLightNear; out vec4 vLightFar;
+out vec3 vPos; out vec3 vNrm; out vec4 vLightNear; out vec4 vLightFar;
 void main(){
   vPos = aPos;
+  vNrm = aNrm;
   vLightNear = uLightVPNear * vec4(aPos, 1.0);
   vLightFar  = uLightVPFar  * vec4(aPos, 1.0);
   gl_Position = uVP * vec4(aPos, 1.0);
 }`;
 
 const FS_TERRAIN = LIB + `
-in vec3 vPos; in vec4 vLightNear; in vec4 vLightFar;
+in vec3 vPos; in vec3 vNrm; in vec4 vLightNear; in vec4 vLightFar;
 uniform samplerCube uEnv;
 uniform sampler2D uSandAlb;
 uniform sampler2D uSandNrm;
@@ -669,7 +671,7 @@ void main(){
   /* ---- 白模测试场：浅灰底 + 10 m / 50 m 方块网格 ---- */
   base = mix(vec3(0.470, 0.472, 0.468), base, 0.12);
   base *= 0.94 + 0.10 * (micro - 0.5);
-  vec3 N = vec3(0.0, 1.0, 0.0);
+  vec3 N = normalize(vNrm);
   float rough = 0.90;
 
   vec2 fw = max(fwidth(p), vec2(0.0008));
@@ -2849,35 +2851,37 @@ function buildWorld(){
     const s = rr(0.35, 1.7);
     const rot = rr(0, Math.PI * 2);
     const tone = rr(0.40, 0.58);
-    addRock(v, cx, s * 0.35, cz, s, rot, [tone * 1.02, tone, tone * 0.97], pid);
+    addRock(v, cx, groundH(cx, cz) + s * 0.35, cz, s, rot, [tone * 1.02, tone, tone * 0.97], pid);
   }
   pid++;
 
-  // 距离标尺（每 100 m 一对白杆）
+  // 距离标尺（每 100 m 一对白杆，贴地）
   for(let i = 1; i <= 6; i++){
     const z = i * 100;
     for(const s of [-1, 1]){
-      addBox(v, s * 46, 0.9, z, 0.12, 1.8, 0.12, [0.70, 0.71, 0.70], [0.8, 0.0, 1.0], pid);
-      addBox(v, s * 46, 1.65, z, 0.60, 0.34, 0.06, [0.86, 0.86, 0.82], [0.8, 0.0, 1.0], pid);
+      const y = groundH(s * 46, z);
+      addBox(v, s * 46, y + 0.9, z, 0.12, 1.8, 0.12, [0.70, 0.71, 0.70], [0.8, 0.0, 1.0], pid);
+      addBox(v, s * 46, y + 1.65, z, 0.60, 0.34, 0.06, [0.86, 0.86, 0.82], [0.8, 0.0, 1.0], pid);
     }
   }
   pid++;
 
-  // 混凝土掩体（白模：浅灰块）
+  // 混凝土掩体（白模：浅灰块，贴地）
   for(let i = 0; i < 7; i++){
     const a = rr(0, Math.PI * 2), d = rr(20, 90);
     const bx = Math.cos(a) * d, bz = Math.sin(a) * d;
     const tone = rr(0.50, 0.66);
-    addBox(v, bx, 0.55, bz, rr(1.6, 3.2), rr(0.7, 1.1), rr(0.8, 1.6),
+    const sy = rr(0.7, 1.1);
+    addBox(v, bx, groundH(bx, bz) + sy * 0.5, bz, rr(1.6, 3.2), sy, rr(0.8, 1.6),
            [tone, tone * 1.01, tone * 1.03], [0.85, 0.0, 1.0], pid, rr(-0.4, 0.4));
   }
   pid++;
 
-  // 油桶
+  // 油桶（贴地）
   for(let i = 0; i < 10; i++){
     const a = rr(0, Math.PI * 2), d = rr(14, 80);
-    const bx = Math.cos(a) * d, bz = Math.sin(a) * d;
-    addCyl(v, [bx, 0, bz], [bx, 0.88, bz], 0.29, 0.29, 8,
+    const bx = Math.cos(a) * d, bz = Math.sin(a) * d, y = groundH(bx, bz);
+    addCyl(v, [bx, y, bz], [bx, y + 0.88, bz], 0.29, 0.29, 8,
            [0.30, 0.16, 0.10], [0.70, 0.15, 1.0], pid);
   }
   pid++;
@@ -3142,9 +3146,111 @@ function mapBuildHouses(){
   return models;
 }
 
+/* ---------------- 白模试验场地形 ---------------- */
+/*  纯程序化高度场：中央出生区/靶道保持平整，两侧是缓坡、土丘、
+    长条土垄、反坦克壕和浅洼地；场地外平滑回到 0（外面就是平原）。 */
+function boFall(t){
+  t = Math.max(0, Math.min(1, t));
+  return t * t * (3 - 2 * t);
+}
+
+/* 椭圆余弦土包：中心 h，边缘 0 且坡度为 0（可叠加负值做洼地） */
+function boBump(x, z, cx, cz, rx, rz, h, rot){
+  const dx = x - cx, dz = z - cz;
+  const c = Math.cos(rot), s = Math.sin(rot);
+  const u = (dx * c + dz * s) / rx;
+  const v = (-dx * s + dz * c) / rz;
+  const r2 = u * u + v * v;
+  if(r2 >= 1) return 0;
+  return h * 0.5 * (1 + Math.cos(Math.PI * Math.sqrt(r2)));
+}
+
+function blockoutH(x, z){
+  const r0 = Math.hypot(x, z);
+  /* 中央 60 m 完全平整，外面 70 m 过渡到起伏地形 */
+  const pad = boFall((r0 - 58) / 70);
+  /* 场地边缘 480~620 m 平滑收回 0 */
+  const edge = 1 - boFall((r0 - 480) / 140);
+  const k = pad * edge;
+  let h = 0;
+
+  /* 低频起伏的底色（约 ±1.6 m） */
+  const roll = boFall((r0 - 70) / 80) * edge;
+  h += roll * (0.85 * Math.sin(x * 0.013) * Math.cos(z * 0.011)
+             + 0.55 * Math.sin((x * 0.7 + z) * 0.018 + 1.3)
+             + 0.30 * Math.cos((x - z * 0.6) * 0.030 + 0.7));
+
+  /* 左后方大缓坡：最高的地形，可以绕上去俯射 */
+  h += k * boBump(x, z, -255, -95, 205, 155, 14.0, -0.24);
+  /* 右侧南北向长土垄：当掩体用 */
+  h += k * boBump(x, z, 300, 35, 76, 255, 9.5, 0.16);
+  /* 目标区右后的缓丘 */
+  h += k * boBump(x, z, 215, 315, 125, 115, 8.0, 0.0);
+  /* 靶道左侧的小高台 */
+  h += k * boBump(x, z, -125, 250, 82, 105, 7.5, -0.10);
+  /* 后方反坦克壕：横穿的长条负地形 */
+  h += k * boBump(x, z, 30, -235, 210, 30, -5.2, 0.09);
+  /* 右前方浅洼地 */
+  h += k * boBump(x, z, 155, 175, 92, 78, -3.2, 0.0);
+  /* 出生点右后方的小土包：练爬坡 */
+  h += k * boBump(x, z, 125, -55, 58, 72, 5.0, 0.35);
+
+  return h;
+}
+
+/* 白模地形网格：中心 10 m 网格，外圈按 640/760/1000/1350/1800/2400 m 渐疏，
+   一直到远山脚下，和原来的平面地面无缝衔接。 */
+function buildBlockoutTerrain(){
+  if(MAP.ok) return null;
+  const HALF = 560, STEP = 10;
+  const OUT = [640, 760, 1000, 1350, 1800, 2400];
+  const coords = [];
+  for(let i = OUT.length - 1; i >= 0; i--) coords.push(-OUT[i]);
+  for(let v = -HALF; v <= HALF + 1e-6; v += STEP) coords.push(v);
+  for(let i = 0; i < OUT.length; i++) coords.push(OUT[i]);
+
+  const N = coords.length;
+  const pos = new Float32Array(N * N * 3);
+  const nrm = new Float32Array(N * N * 3);
+  const idx = [];
+  for(let j = 0; j < N; j++){
+    for(let i = 0; i < N; i++){
+      const x = coords[i], z = coords[j];
+      const h = blockoutH(x, z);
+      const o = (j * N + i) * 3;
+      pos[o] = x; pos[o + 1] = h; pos[o + 2] = z;
+      const e = 2.0;
+      const dx = (blockoutH(x + e, z) - blockoutH(x - e, z)) / (2 * e);
+      const dz = (blockoutH(x, z + e) - blockoutH(x, z - e)) / (2 * e);
+      const inv = 1 / Math.hypot(dx, 1, dz);
+      nrm[o] = -dx * inv; nrm[o + 1] = inv; nrm[o + 2] = -dz * inv;
+    }
+  }
+  for(let j = 0; j < N - 1; j++){
+    for(let i = 0; i < N - 1; i++){
+      const a = j * N + i, b = a + 1, c = a + N, d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+  }
+
+  const inter = new Float32Array(N * N * 6);
+  for(let i = 0; i < N * N; i++){
+    inter[i * 6]     = pos[i * 3];     inter[i * 6 + 1] = pos[i * 3 + 1]; inter[i * 6 + 2] = pos[i * 3 + 2];
+    inter[i * 6 + 3] = nrm[i * 3];     inter[i * 6 + 4] = nrm[i * 3 + 1]; inter[i * 6 + 5] = nrm[i * 3 + 2];
+  }
+
+  const vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  gl.bufferData(gl.ARRAY_BUFFER, inter, gl.STATIC_DRAW);
+  const ibo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(idx), gl.STATIC_DRAW);
+  return { vbo, ibo, count: idx.length };
+}
+
 /* ---------------- 贴地高度 ---------------- */
 function groundH(x, z){
-  if(!MAP.ok) return 0;
+  if(!MAP.ok) return blockoutH(x, z);
   const N = MAP.N, half = MAP.halfM;
   const fx = (x + half) / (2 * half) * (N - 1);
   const fz = (z + half) / (2 * half) * (N - 1);
@@ -3367,7 +3473,7 @@ for(const [ox, oz] of TLIST){
   const x = RANGE0.x + ox * RRC + oz * RRS;
   const z = RANGE0.z - ox * RRS + oz * RRC;
   TARGETS.push({
-    x, z, y: MAP.ok ? groundH(x, z) : 0,
+    x, z, y: groundH(x, z),
     hp: TGT.hp, max: TGT.hp,
     tilt: 0,                    // 绕 X 轴向后倒的角度
     state: 'up',                // up | falling | down | rising
@@ -3961,7 +4067,7 @@ function fxRing(center, radius, col, seed){
 
 /* 爆炸冲击波：从 r0 扩到 r1，寿命 life 秒 */
 function groundRing(p, r0, r1, life, col){
-  RINGS.push({ p: [p[0], 0.06, p[2]], r0, r1, life, maxLife: life, seed: Math.random(), col });
+  RINGS.push({ p: [p[0], (p[1] || 0) + 0.06, p[2]], r0, r1, life, maxLife: life, seed: Math.random(), col });
 }
 
 function fxVert(x,y,z, c){
@@ -4123,35 +4229,37 @@ function damageTarget(tg, dmg, ip, t, isMG){
 }
 
 function groundImpact(p){
-  spawnDust(p[0], 0.12, p[2], rr(-0.6,0.6), rr(0.5,1.3), rr(-0.6,0.6), rr(0.9,1.8));
-  spawnDust(p[0], 0.18, p[2], rr(-0.9,0.9), rr(0.8,2.0), rr(-0.9,0.9), rr(0.7,1.4));
-  spawnSparks([p[0], 0.16, p[2]], 5, 0.8);
+  const gy = p[1] || 0;
+  spawnDust(p[0], gy + 0.12, p[2], rr(-0.6,0.6), rr(0.5,1.3), rr(-0.6,0.6), rr(0.9,1.8));
+  spawnDust(p[0], gy + 0.18, p[2], rr(-0.9,0.9), rr(0.8,2.0), rr(-0.9,0.9), rr(0.7,1.4));
+  spawnSparks([p[0], gy + 0.16, p[2]], 5, 0.8);
   addScorch(p[0], p[2]);
-  SMOKES.push({ p:[p[0], 0.25, p[2]], v:[rr(-0.5,0.5), rr(0.5,1.2), rr(-0.5,0.5)],
+  SMOKES.push({ p:[p[0], gy + 0.25, p[2]], v:[rr(-0.5,0.5), rr(0.5,1.2), rr(-0.5,0.5)],
                 life:0.5, maxLife:0.5, size:0.35, seed:Math.random() });
-  LIGHTS.push({ p:[p[0], 0.5, p[2]], col:[1.0,0.6,0.3], intensity:1.6, life:0.10, maxLife:0.10 });
+  LIGHTS.push({ p:[p[0], gy + 0.5, p[2]], col:[1.0,0.6,0.3], intensity:1.6, life:0.10, maxLife:0.10 });
   sndGroundHit(p);
 }
 
 /* 阵亡爆炸：冲击波 + 白热火球 + 火花 + 烟团 + 扬尘 + 动态光 + 燃烧残骸 */
 function netBlowUp(p){
+  const gy = p[1] || 0;
   /* 地面冲击波：快的一层暗、慢的一层向外扩 */
   groundRing(p, 0.8, 16.0, 0.62, [1.9, 0.92, 0.40, 0.85]);
   groundRing(p, 0.4, 7.0, 0.34, [2.8, 1.7, 0.95, 0.95]);
 
   /* 火球：白热核心 → 橙红 → 大范围软光 */
-  FLASHES.push({ p:[p[0], 1.7, p[2]], life:0.10, maxLife:0.10, size:1.7,
+  FLASHES.push({ p:[p[0], gy + 1.7, p[2]], life:0.10, maxLife:0.10, size:1.7,
                  seed:Math.random(), kind:1, col:[7.0, 4.8, 2.6, 1.0] });
-  FLASHES.push({ p:[p[0], 1.5, p[2]], life:0.26, maxLife:0.26, size:2.8,
+  FLASHES.push({ p:[p[0], gy + 1.5, p[2]], life:0.26, maxLife:0.26, size:2.8,
                  seed:Math.random(), kind:1, col:[5.5, 2.6, 0.95, 1.0] });
-  FLASHES.push({ p:[p[0], 1.5, p[2]], life:0.60, maxLife:0.60, size:5.4,
+  FLASHES.push({ p:[p[0], gy + 1.5, p[2]], life:0.60, maxLife:0.60, size:5.4,
                  seed:Math.random(), kind:0, col:[1.8, 0.66, 0.22, 0.62] });
 
   /* 火花 */
   for(let i=0;i<56;i++){
     if(SPARKS.length >= 420) break;
     SPARKS.push({
-      p: [p[0]+rr(-0.7,0.7), 1.0+rr(-0.2,0.8), p[2]+rr(-0.7,0.7)],
+      p: [p[0]+rr(-0.7,0.7), gy + 1.0+rr(-0.2,0.8), p[2]+rr(-0.7,0.7)],
       v: [rr(-1,1)*13.0, rr(-0.1,1)*14.0, rr(-1,1)*13.0],
       life: rr(0.30,1.10), size: rr(0.05,0.20), hot: 1.0,
     });
@@ -4159,7 +4267,7 @@ function netBlowUp(p){
   /* 烟团：冲起来之后挂在上面 */
   for(let i=0;i<18;i++){
     SMOKES.push({
-      p: [p[0]+rr(-1.0,1.0), 0.9+rr(0,2.0), p[2]+rr(-1.0,1.0)],
+      p: [p[0]+rr(-1.0,1.0), gy + 0.9+rr(0,2.0), p[2]+rr(-1.0,1.0)],
       v: [rr(-2.2,2.2), rr(1.6,4.2), rr(-2.2,2.2)],
       life: rr(1.4,2.6), maxLife: 2.6, size: rr(1.1,2.2), seed: Math.random(),
     });
@@ -4167,22 +4275,44 @@ function netBlowUp(p){
   /* 地面扬尘：一圈往外推 */
   for(let i=0;i<22;i++){
     const a = Math.random()*6.283, sp = rr(1.0, 4.5);
-    spawnDust(p[0]+rr(-1.2,1.2), 0.25+rr(0,1.2), p[2]+rr(-1.2,1.2),
+    spawnDust(p[0]+rr(-1.2,1.2), gy + 0.25+rr(0,1.2), p[2]+rr(-1.2,1.2),
               Math.cos(a)*sp, rr(1.0,3.6), Math.sin(a)*sp, rr(1.6,3.4));
   }
   /* 动态光 */
-  LIGHTS.push({ p:[p[0],1.7,p[2]], col:[1.0,0.52,0.20], intensity:11.0, life:0.50, maxLife:0.50 });
-  LIGHTS.push({ p:[p[0],1.2,p[2]], col:[1.0,0.40,0.12], intensity:6.0, life:0.90, maxLife:0.90 });
+  LIGHTS.push({ p:[p[0], gy + 1.7, p[2]], col:[1.0,0.52,0.20], intensity:11.0, life:0.50, maxLife:0.50 });
+  LIGHTS.push({ p:[p[0], gy + 1.2, p[2]], col:[1.0,0.40,0.12], intensity:6.0, life:0.90, maxLife:0.90 });
 
   /* 燃烧残骸 + 声音 + 震屏 */
   spawnWreck(p);
   sndBoom(p);
-  const dx = p[0]-cam.pos[0], dy = 1.2-cam.pos[1], dz = p[2]-cam.pos[2];
+  const dx = p[0]-cam.pos[0], dy = gy + 1.2 - cam.pos[1], dz = p[2]-cam.pos[2];
   const dist = Math.hypot(dx, dy, dz);
   addShake(clamp(1.15 - dist / 55, 0.08, 1.0));
 }
 
 /* ---------------- 弹道推进 ---------------- */
+/* 线段 a→b 与地形求交：分段采样，避免高速炮弹一次跨过窄土垄/壕沟。
+   命中时返回交点（y 取地面高度），否则返回 null。 */
+function groundHitPoint(a, b){
+  const K = 6;
+  let px = a[0], py = a[1], pz = a[2], pg = groundH(px, pz);
+  for(let k = 1; k <= K; k++){
+    const f = k / K;
+    const x = a[0] + (b[0] - a[0]) * f;
+    const y = a[1] + (b[1] - a[1]) * f;
+    const z = a[2] + (b[2] - a[2]) * f;
+    const g = groundH(x, z);
+    if(y <= g && py >= pg){
+      const da = py - pg, db = g - y;
+      const t = da / Math.max(1e-9, da + db);
+      const hx = px + (x - px) * t, hz = pz + (z - pz) * t;
+      return [hx, groundH(hx, hz), hz];
+    }
+    px = x; py = y; pz = z; pg = g;
+  }
+  return null;
+}
+
 function stepShell(s, dt, t){
   const v = s.v, p = s.p;
   const g   = s.g   == null ? WPN.g   : s.g;
@@ -4247,13 +4377,9 @@ function stepShell(s, dt, t){
       }
     }
 
-    // 地面（地图模式对高度场求交）
-    const ga = MAP.ok ? groundH(ax, az) : 0;
-    const gb = MAP.ok ? groundH(p[0], p[2]) : 0;
-    if(MAP.ok ? (ay >= ga && p[1] <= gb) : (p[1] <= 0)){
-      const da = ay - ga, db = gb - p[1];
-      const f = da / Math.max(1e-6, da + db);
-      const gp = [ax + (p[0]-ax)*f, MAP.ok ? ga + (gb - ga) * f : 0, az + (p[2]-az)*f];
+    // 地面（高度场求交；白模地形也有起伏）
+    const gp = groundHitPoint([ax, ay, az], p);
+    if(gp){
       if(s.mg) mgGroundImpact(gp); else groundImpact(gp);
       s.alive = false;
       return;
@@ -4294,10 +4420,9 @@ function traceShot(){
       _trace.p = rh.point; _trace.dist = dist; _trace.target = {net:true, slot:rh.slot}; _trace.ok = true;
       return _trace;
     }
-    if(p[1] <= 0){
-      const f = ay / Math.max(1e-6, ay - p[1]);
-      _trace.p = [ax + (p[0]-ax)*f, 0, az + (p[2]-az)*f];
-      _trace.dist = dist; _trace.target = null; _trace.ok = true;
+    const gp = groundHitPoint([ax,ay,az], p);
+    if(gp){
+      _trace.p = gp; _trace.dist = dist; _trace.target = null; _trace.ok = true;
       return _trace;
     }
   }
@@ -4478,9 +4603,10 @@ function mgUpdate(t, dt){
 
 /* 机枪打地面：比主炮轻得多，避免连射时满地爆炸 */
 function mgGroundImpact(p){
+  const gy = p[1] || 0;
   if(Math.random() < 0.45)
-    spawnDust(p[0], 0.10, p[2], rr(-0.35,0.35), rr(0.25,0.75), rr(-0.35,0.35), rr(0.45,0.95));
-  if(Math.random() < 0.3) spawnSparks([p[0], 0.12, p[2]], 2, 0.45);
+    spawnDust(p[0], gy + 0.10, p[2], rr(-0.35,0.35), rr(0.25,0.75), rr(-0.35,0.35), rr(0.45,0.95));
+  if(Math.random() < 0.3) spawnSparks([p[0], gy + 0.12, p[2]], 2, 0.45);
   if(Math.random() < 0.16) sndGroundHit(p);
 }
 
@@ -5175,8 +5301,8 @@ function debrisMatrix(d){
 
 /* 在 p 处留下一处燃烧的残骸（含一圈飞散的碎片） */
 function spawnWreck(p){
-  const x = p[0], z = p[2];
-  WRECKS.push({ x, z, t: 0, smokeAcc: 0, fireAcc: 0, sparkAcc: 0, lightAcc: 0 });
+  const x = p[0], z = p[2], y = p[1] || 0;
+  WRECKS.push({ x, z, y, t: 0, smokeAcc: 0, fireAcc: 0, sparkAcc: 0, lightAcc: 0 });
   while(WRECKS.length > WRECK_CAP) WRECKS.shift();
 
   /* 地面焦痕 */
@@ -5189,7 +5315,7 @@ function spawnWreck(p){
     const a = (i / n) * Math.PI * 2 + rr(-0.35, 0.35);
     const sp = rr(4.5, 13.0);
     DEBRIS.push({
-      p: [x + Math.cos(a) * 0.55, rr(0.7, 1.6), z + Math.sin(a) * 0.55],
+      p: [x + Math.cos(a) * 0.55, y + rr(0.7, 1.6), z + Math.sin(a) * 0.55],
       v: [Math.cos(a) * sp, rr(3.5, 11.0), Math.sin(a) * sp],
       rot: [Math.random() * 6.28, Math.random() * 6.28, Math.random() * 6.28],
       rv: [rr(-9, 9), rr(-9, 9), rr(-9, 9)],
@@ -5218,7 +5344,7 @@ function updateWrecks(dt){
     while(w.smokeAcc > smokeGap){
       w.smokeAcc -= smokeGap;
       SMOKES.push({
-        p: [w.x + rr(-0.85, 0.85), 1.35 + rr(0, 0.9), w.z + rr(-0.85, 0.85)],
+        p: [w.x + rr(-0.85, 0.85), w.y + 1.35 + rr(0, 0.9), w.z + rr(-0.85, 0.85)],
         v: [rr(-0.55, 0.55), rr(1.2, 2.2) * Math.max(0.25, strength), rr(-0.55, 0.55)],
         life: rr(1.8, 3.2), maxLife: 3.2, size: rr(0.75, 1.35) * (0.7 + 0.5 * strength),
         seed: Math.random(),
@@ -5231,7 +5357,7 @@ function updateWrecks(dt){
       const k = rr(0.45, 1.0) * strength;
       if(k > 0.02){
         FLASHES.push({
-          p: [w.x + rr(-0.95, 0.95), 1.0 + rr(0, 0.8), w.z + rr(-0.95, 0.95)],
+          p: [w.x + rr(-0.95, 0.95), w.y + 1.0 + rr(0, 0.8), w.z + rr(-0.95, 0.95)],
           dir: [0, 1, 0], life: 0.10, maxLife: 0.10,
           size: rr(0.35, 0.85) * (0.55 + k), seed: Math.random(), kind: 0,
           col: [3.2 * k, 1.15 * k, 0.32 * k, 0.8 * k],
@@ -5245,7 +5371,7 @@ function updateWrecks(dt){
       if(SPARKS.length < 400){
         const a = Math.random() * 6.283, sp = rr(0.3, 2.2);
         SPARKS.push({
-          p: [w.x + rr(-0.7, 0.7), 1.0 + rr(0, 0.9), w.z + rr(-0.7, 0.7)],
+          p: [w.x + rr(-0.7, 0.7), w.y + 1.0 + rr(0, 0.9), w.z + rr(-0.7, 0.7)],
           v: [Math.cos(a) * sp, rr(1.4, 3.6), Math.sin(a) * sp],
           life: rr(0.5, 1.5), size: rr(0.03, 0.07), hot: 1.0,
         });
@@ -5257,7 +5383,7 @@ function updateWrecks(dt){
     if(w.lightAcc > 0.09 && w.t < 20){
       w.lightAcc = 0;
       LIGHTS.push({
-        p: [w.x + rr(-0.5, 0.5), 1.3, w.z + rr(-0.5, 0.5)],
+        p: [w.x + rr(-0.5, 0.5), w.y + 1.3, w.z + rr(-0.5, 0.5)],
         col: [1.0, 0.46, 0.15],
         intensity: (1.2 + Math.random() * 1.6) * strength,
         life: 0.19, maxLife: 0.19,
@@ -5277,8 +5403,9 @@ function updateWrecks(dt){
     d.rot[0] += d.rv[0] * dt; d.rot[1] += d.rv[1] * dt; d.rot[2] += d.rv[2] * dt;
 
     const half = 0.14 * d.s;
-    if(d.p[1] < half){
-      d.p[1] = half;
+    const gy = groundH(d.p[0], d.p[2]);
+    if(d.p[1] < gy + half){
+      d.p[1] = gy + half;
       if(Math.abs(d.v[1]) < 1.1){
         d.v[1] = 0;
         d.v[0] *= 0.52; d.v[2] *= 0.52;
@@ -5293,7 +5420,7 @@ function updateWrecks(dt){
         d.v[0] *= 0.72; d.v[2] *= 0.72;
         d.rv[0] *= 0.6; d.rv[1] *= 0.6; d.rv[2] *= 0.6;
         if(Math.random() < 0.45)
-          spawnDust(d.p[0], 0.10, d.p[2], rr(-0.5, 0.5), rr(0.4, 1.1), rr(-0.5, 0.5), rr(0.3, 0.7));
+          spawnDust(d.p[0], gy + 0.10, d.p[2], rr(-0.5, 0.5), rr(0.4, 1.1), rr(-0.5, 0.5), rr(0.3, 0.7));
       }
     }
   }
@@ -5614,15 +5741,18 @@ let STARTED = false;
 const terrainVBO = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, terrainVBO);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-  -2400,0,-2400,  2400,0,-2400,  2400,0, 2400,
-  -2400,0,-2400,  2400,0, 2400, -2400,0, 2400,
+  -2400,0,-2400, 0,1,0,  2400,0,-2400, 0,1,0,  2400,0, 2400, 0,1,0,
+  -2400,0,-2400, 0,1,0,  2400,0, 2400, 0,1,0, -2400,0, 2400, 0,1,0,
 ]), gl.STATIC_DRAW);
 
-/* 地图模式：真实高度网格 + 地面贴图（无 MAP 数据时退回上面的平面） */
+/* 地图模式：真实高度网格 + 地面贴图；白模模式：程序化起伏地形网格 */
 let mapMesh = null;
+let blockMesh = null;
 if(MAP.ok){
   mapMesh = buildMapTerrain();
   mapLoadTexture();
+} else {
+  blockMesh = buildBlockoutTerrain();
 }
 
 /* ---- 车辆状态 ---- */
@@ -6269,18 +6399,16 @@ function updateSim(t, dt){
   car.prevV = v;
   let pitchT = clamp(-acc * 0.0075, -0.055, 0.055);
   let rollT  = clamp( v * yawRate * 0.0075, -0.05, 0.05);
+  car.pos[1] = groundH(car.pos[0], car.pos[2]);
+  const [sx, sz] = groundSlope(car.pos[0], car.pos[2]);
+  const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
+  const rx = Math.cos(car.yaw), rz = -Math.sin(car.yaw);
+  pitchT += clamp(-(sx * fx + sz * fz), -0.26, 0.26);
+  rollT  += clamp( (sx * rx + sz * rz), -0.26, 0.26);
   if(MAP.ok){
-    car.pos[1] = groundH(car.pos[0], car.pos[2]);
-    const [sx, sz] = groundSlope(car.pos[0], car.pos[2]);
-    const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
-    const rx = Math.cos(car.yaw), rz = -Math.sin(car.yaw);
-    pitchT += clamp(-(sx * fx + sz * fz), -0.22, 0.22);
-    rollT  += clamp( (sx * rx + sz * rz), -0.22, 0.22);
     /* 建筑碰撞：把车推出去 */
     const hit = mapCollide(car.pos[0], car.pos[2], 1.9);
     if(hit){ car.pos[0] += hit.dx; car.pos[2] += hit.dz; }
-  } else {
-    car.pos[1] = 0;
   }
   car.pitchV += ((pitchT - car.pitch) * 110 - car.pitchV * 16) * dt;
   car.pitch  += car.pitchV * dt;
@@ -6363,7 +6491,7 @@ function updateSim(t, dt){
       addMark(k, wx, wz, t);
       if(speed > 2.2 && rnd() < Math.min(1, speed * 0.045)){
         const bx = -sy * 0.9, bz = -cy * 0.9;
-        spawnDust(wx + rr(-0.30,0.30), 0.22, wz + rr(-0.30,0.30),
+        spawnDust(wx + rr(-0.30,0.30), car.pos[1] + 0.22, wz + rr(-0.30,0.30),
                   bx + rr(-0.55,0.55), rr(0.30,0.95), bz + rr(-0.55,0.55),
                   rr(0.7,1.7));
       }
@@ -6409,7 +6537,7 @@ function updateSim(t, dt){
     cam.pitch = -0.11;               // 稍微俯视
     const cp2 = Math.cos(cam.pitch);
     cam.pos[0] += (car.pos[0] - Math.sin(a) * dist * cp2 - cam.pos[0]) * Math.min(1, dt * 4);
-    cam.pos[1] += ((MAP.ok ? car.pos[1] + 3.10 : 3.10) - cam.pos[1]) * Math.min(1, dt * 4);
+    cam.pos[1] += ((car.pos[1] + 3.10) - cam.pos[1]) * Math.min(1, dt * 4);
     cam.pos[2] += (car.pos[2] - Math.cos(a) * dist * cp2 - cam.pos[2]) * Math.min(1, dt * 4);
     cam.fov = 44;
   } else if(input.sniper){
@@ -6441,12 +6569,16 @@ function updateSim(t, dt){
     const cp = Math.cos(cam.pitch);
     const dx = car.pos[0] - Math.sin(cam.yaw) * zoom * cp;
     const dz2 = car.pos[2] - Math.cos(cam.yaw) * zoom * cp;
-    const baseY = MAP.ok ? car.pos[1] : 0;
+    const baseY = car.pos[1];
     const dyv = baseY + 3.90 - Math.sin(cam.pitch) * zoom * 0.5;
     cam.pos[0] += (dx - cam.pos[0]) * Math.min(1, dt * 6.5);
     cam.pos[1] += (dyv - cam.pos[1]) * Math.min(1, dt * 6.5);
     cam.pos[2] += (dz2 - cam.pos[2]) * Math.min(1, dt * 6.5);
     cam.pos[1] = Math.max(cam.pos[1], baseY + 1.0);
+    /* 白模地形：镜头别钻到坡里 */
+    if(!MAP.ok){
+      cam.pos[1] = Math.max(cam.pos[1], groundH(cam.pos[0], cam.pos[2]) + 1.1);
+    }
     cam.fov = 58;
   }
 
@@ -6479,10 +6611,11 @@ function addMark(side, x, z, t){
 
   const slot = markHead[i];
   const base = (i*MARK_CAP + slot) * 24;
-  const P = [
-    [lx-nx, 0.014, lz-nz], [x-nx, 0.014, z-nz], [x+nx, 0.014, z+nz],
-    [lx-nx, 0.014, lz-nz], [x+nx, 0.014, z+nz], [lx+nx, 0.014, lz+nz],
-  ];
+  const p0 = [lx-nx, groundH(lx-nx, lz-nz) + 0.02, lz-nz];
+  const p1 = [x-nx,  groundH(x-nx,  z-nz)  + 0.02, z-nz];
+  const p2 = [x+nx,  groundH(x+nx,  z+nz)  + 0.02, z+nz];
+  const p3 = [lx+nx, groundH(lx+nx, lz+nz) + 0.02, lz+nz];
+  const P = [p0, p1, p2, p0, p2, p3];
   for(let k=0;k<6;k++){
     const o = base + k*4;
     markData[o] = P[k][0]; markData[o+1] = P[k][1]; markData[o+2] = P[k][2]; markData[o+3] = t;
@@ -6499,9 +6632,10 @@ function addScorch(x, z){
   const slot = markHead[i];
   const base = (i*MARK_CAP + slot) * 24;
   const r = 0.42;
+  const y = groundH(x, z) + 0.024;
   const P = [
-    [x-r, 0.017, z-r], [x+r, 0.017, z-r], [x+r, 0.017, z+r],
-    [x-r, 0.017, z-r], [x+r, 0.017, z+r], [x-r, 0.017, z+r],
+    [x-r, y, z-r], [x+r, y, z-r], [x+r, y, z+r],
+    [x-r, y, z-r], [x+r, y, z+r], [x-r, y, z+r],
   ];
   for(let k=0;k<6;k++){
     const o = base + k*4;
@@ -7160,14 +7294,23 @@ function draw(){
       gl.uniform1f(pTerrain.u.uSandStrength, SAND_STRENGTH);
     }
     setShadowUniforms(pTerrain.u);
-    gl.bindBuffer(gl.ARRAY_BUFFER, terrainVBO);
-    {
-      clearAttribs();
-      const l = gl.getAttribLocation(pTerrain.p, 'aPos');
-      gl.enableVertexAttribArray(l);
-      gl.vertexAttribPointer(l, 3, gl.FLOAT, false, 0, 0);
+    clearAttribs();
+    const lp = gl.getAttribLocation(pTerrain.p, 'aPos');
+    const ln = gl.getAttribLocation(pTerrain.p, 'aNrm');
+    gl.enableVertexAttribArray(lp);
+    gl.enableVertexAttribArray(ln);
+    if(blockMesh){
+      gl.bindBuffer(gl.ARRAY_BUFFER, blockMesh.vbo);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, blockMesh.ibo);
+      gl.vertexAttribPointer(lp, 3, gl.FLOAT, false, 24, 0);
+      gl.vertexAttribPointer(ln, 3, gl.FLOAT, false, 24, 12);
+      gl.drawElements(gl.TRIANGLES, blockMesh.count, gl.UNSIGNED_INT, 0);
+    } else {
+      gl.bindBuffer(gl.ARRAY_BUFFER, terrainVBO);
+      gl.vertexAttribPointer(lp, 3, gl.FLOAT, false, 24, 0);
+      gl.vertexAttribPointer(ln, 3, gl.FLOAT, false, 24, 12);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
     }
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
   /* 车辙 */
@@ -9097,7 +9240,7 @@ function netSpawnSelf(){
   /* 地图模式：以 spawn 为圆心，四个方向错开（面向地图中心/北方） */
   const off = [[-14, 0], [0, 14], [14, 0], [0, -14]][i];
   car.pos[0] = base.x + off[0];
-  car.pos[1] = MAP.ok ? groundH(base.x + off[0], base.z + off[1]) : 0;
+  car.pos[1] = groundH(base.x + off[0], base.z + off[1]);
   car.pos[2] = base.z + off[1];
   car.yaw = base.yaw || 0;
   car.turret = 0; car.gun = 0;
@@ -9158,8 +9301,8 @@ function netCollideSelf(){
     car.yawRate *= 0.6;
     if(performance.now() - (NET.bumpAt || 0) > 260){
       NET.bumpAt = performance.now();
-      spawnSparks([cx, 1.1, cz], 7, 1.1);
-      spawnDust(cx, 0.4, cz, nx * 1.6, rr(0.6, 1.6), nz * 1.6, rr(0.9, 1.8));
+      spawnSparks([cx, car.pos[1] + 1.1, cz], 7, 1.1);
+      spawnDust(cx, car.pos[1] + 0.4, cz, nx * 1.6, rr(0.6, 1.6), nz * 1.6, rr(0.9, 1.8));
     }
   }
 }
