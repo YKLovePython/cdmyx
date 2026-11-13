@@ -269,10 +269,33 @@
           color:rgba(255,220,180,.78);text-shadow:0 0 8px rgba(0,0,0,.9);z-index:8;
           transition:opacity .6s;white-space:nowrap}
   #trot{display:none;position:fixed;left:50%;top:44%;transform:translate(-50%,-50%);
-        padding:10px 14px;background:rgba(8,9,11,.88);border:1px solid rgba(255,176,84,.5);
+        padding:11px 16px;background:rgba(8,9,11,.9);border:1px solid rgba(255,176,84,.55);
         color:#ffd9a0;font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
-        letter-spacing:.12em;z-index:9;pointer-events:none}
+        letter-spacing:.12em;z-index:9;pointer-events:auto;cursor:pointer;white-space:nowrap;
+        -webkit-tap-highlight-color:transparent}
+  #trot:active{background:rgba(255,176,84,.26);color:#fff2dd;border-color:rgba(255,196,120,.9)}
   @media (orientation:portrait){ body.playing.touch #trot{display:block} }
+  html.rot90 #trot,html.rot270 #trot{display:none!important}
+
+  /* ---- 横屏兜底：浏览器不支持 screen.orientation.lock 时整页转 90° ---- */
+  html.rot90 body{position:fixed;left:0;top:0;
+        width:100vh;height:100vw;
+        width:100dvh;height:100dvw;
+        transform-origin:top left;
+        transform:rotate(90deg) translateY(-100%)}
+  html.rot270 body{position:fixed;left:0;top:0;
+        width:100vh;height:100vw;
+        width:100dvh;height:100dvw;
+        transform-origin:top left;
+        transform:rotate(-90deg) translateX(-100%)}
+  /* 兜底旋转时留一个翻转按钮：手机往哪边转都能看正 */
+  #tflip{display:none;position:fixed;left:50%;bottom:8px;transform:translateX(-50%);
+        padding:6px 12px;background:rgba(8,9,11,.55);border:1px solid rgba(255,255,255,.16);
+        color:rgba(255,235,210,.72);font:9.5px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+        letter-spacing:.14em;z-index:9;pointer-events:auto;-webkit-tap-highlight-color:transparent}
+  html.rot90 body.playing.touch #tflip,
+  html.rot270 body.playing.touch #tflip{display:block}
+  #tflip:active{background:rgba(255,176,84,.26);color:#fff2dd}
   @media (max-width:560px){
     #tstick{left:16px;bottom:18px;width:118px;height:118px}
     #tstick::before{inset:36px}

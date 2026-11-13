@@ -4193,13 +4193,94 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
     <div id="tcrF" class="tbtn">巡航＋</div>
     <div id="tcrR" class="tbtn">巡航−</div>
     <div id="tchint">左摇杆驾驶 · 屏上拖动瞄准</div>
-    <div id="trot">横屏体验更佳</div>`;
+    <div id="trot">点此横屏</div>
+    <div id="tflip">⇄ 翻转</div>`;
   document.body.appendChild(wrap);
 
   const $ = s => wrap.querySelector(s);
   const stick = $('#tstick'), knob = $('#tknob');
   const fireEl = $('#tfire'), aimEl = $('#taim'), freeEl = $('#tfree');
   const crFEl = $('#tcrF'), crREl = $('#tcrR'), hintEl = $('#tchint');
+  const rotEl = $('#trot');
+  const flipEl = $('#tflip');
+
+  /* ================= 横屏 ================= */
+  /*  优先让系统自己转：requestFullscreen + screen.orientation.lock('landscape')。
+     浏览器不支持（iOS Safari 就没有）时，把 body 整页转 90° 兜底：
+     html.rot90 body 的宽高互换，画布/HUD 一起转，触屏坐标再做一次 90° 映射。
+     兜底状态留一个「翻转」按钮，手机往哪边转都能看正。 */
+  let rot90 = false, rotDir = 1, landscapeWanted = false, rotSettled = false;
+
+  function setRot(on, dir){
+    rot90 = !!on;
+    if(dir) rotDir = dir > 0 ? 1 : -1;
+    const de = document.documentElement;
+    de.classList.toggle('rot90', rot90 && rotDir > 0);
+    de.classList.toggle('rot270', rot90 && rotDir < 0);
+    try{ resize(); }catch(_){}     // 画布尺寸变了，渲染目标（含 TAA 历史）重建
+  }
+
+  function applyRotate(on){
+    if(!!on === rot90) return;
+    setRot(on);
+  }
+
+  /* 把屏幕（视口）增量换算成被旋转后的页面增量 */
+  function mapDelta(dx, dy){
+    if(!rot90) return [dx, dy];
+    return rotDir > 0 ? [dy, -dx] : [-dy, dx];
+  }
+
+  function goLandscape(){
+    if(!TOUCH) return;
+    landscapeWanted = true;
+    const portrait = innerHeight > innerWidth + 2;
+    if(!portrait){ applyRotate(false); rotSettled = true; }   // 本来就横着：只顺手进全屏
+
+    const el = document.documentElement;
+    const fs = el.requestFullscreen || el.webkitRequestFullscreen ||
+               el.webkitRequestFullScreen || el.msRequestFullscreen;
+    let fp = null;
+    if(fs){ try{ fp = fs.call(el, {navigationUI: 'hide'}); }catch(_){ fp = null; } }
+
+    const lock = () => {
+      const o = screen.orientation;
+      if(!o || typeof o.lock !== 'function') return null;
+      try{ return o.lock('landscape'); }catch(_){ return null; }
+    };
+    /* 给系统一点时间真正转过去；转不过去才用 CSS 兜底 */
+    const settle = () => setTimeout(() => {
+      rotSettled = true;
+      applyRotate(innerHeight > innerWidth);
+    }, 340);
+
+    Promise.resolve(fp).then(() => {
+      if(!portrait) return;
+      Promise.resolve(lock()).then(settle, settle);
+    }, () => { if(portrait) settle(); });
+  }
+
+  function syncOrientation(){
+    if(!TOUCH || !rotSettled) return;
+    if(innerWidth > innerHeight + 2){
+      if(rot90) applyRotate(false);              // 已经是真横屏，撤掉兜底旋转
+    }else if(landscapeWanted && !rot90){
+      applyRotate(true);                         // 又转回竖屏了（含退出全屏）→ 继续横屏玩
+    }
+  }
+  addEventListener('resize', syncOrientation);
+  addEventListener('orientationchange', () => setTimeout(syncOrientation, 260));
+  window.goLandscape = goLandscape;
+
+  if(rotEl){
+    rotEl.addEventListener('pointerdown', e => { e.preventDefault(); goLandscape(); });
+  }
+  if(flipEl){
+    flipEl.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if(rot90) setRot(true, -rotDir);      // 90° ↔ -90°，哪种握法都能看正
+    });
+  }
 
   /* ---------------- 摇杆 ---------------- */
   const R = 54;                 // 摇杆最大行程（px）
@@ -4209,6 +4290,7 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
     let dx = x - stickCX, dy = y - stickCY;
     const len = Math.hypot(dx, dy);
     if(len > R){ dx = dx / len * R; dy = dy / len * R; }
+    [dx, dy] = mapDelta(dx, dy);
     knob.style.transform = `translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px)`;
     const dz = v => {
       const a = Math.abs(v);
@@ -4257,8 +4339,9 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
   });
   cv.addEventListener('pointermove', e => {
     if(e.pointerId !== aimId) return;
-    const dx = e.clientX - aimX, dy = e.clientY - aimY;
+    let dx = e.clientX - aimX, dy = e.clientY - aimY;
     aimX = e.clientX; aimY = e.clientY;
+    [dx, dy] = mapDelta(dx, dy);
     /* 手指没有鼠标稳，给一点额外倍率；炮镜里 FOV 会自己缩小 */
     mouseDX += dx * 1.55;
     mouseDY += dy * 1.55;
@@ -5887,6 +5970,8 @@ function startGame(){
   if(garageTimer){ clearInterval(garageTimer); garageTimer = 0; }
   const hint = document.getElementById('lockhint');
   if(hint && !NO_LOCK && AIM_WORLD) hint.style.opacity = '1';
+  /* 手机：进战斗时顺手请求横屏（用户手势里，全屏 + orientation lock 才被允许） */
+  if(TOUCH && typeof window.goLandscape === 'function') window.goLandscape();
   netOnStart();                       // 联机：开始广播自己的状态
   tryLock();                        // 点击/回车都是用户手势，可以直接锁
 }
