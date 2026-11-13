@@ -2081,33 +2081,59 @@ function loadVehicleData(id){
 
   VDATA_BUSY = id;
   const p = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = VEH_SRC + id + '.js';
-    s.async = true;
-
+    let attempt = 0;
     let settled = false;
-    const finish = (ok) => {
+
+    const settle = (ok) => {
       if(settled) return;
       settled = true;
       if(VDATA_BUSY === id) VDATA_BUSY = null;
       VDATA_WAIT.delete(id);
-      if(ok && VDATA.has(id)) resolve(VDATA.get(id));
-      else {
-        if(s.parentNode) s.parentNode.removeChild(s);
-        VDATA_SCRIPT.delete(id);
-        reject(new Error(ok ? '数据未注册' : '文件缺失或无法读取'));
-      }
+      if(ok && VDATA.has(id)){ resolve(VDATA.get(id)); return; }
+      const old = VDATA_SCRIPT.get(id);
+      if(old && old.parentNode) old.parentNode.removeChild(old);
+      VDATA_SCRIPT.delete(id);
+      reject(new Error(ok ? '数据未注册' : '文件缺失或无法读取'));
     };
 
-    s.onload = () => finish(true);
-    s.onerror = () => finish(false);
-    /* 兜底：路径错 / 被策略拦下时不要一直卡在载入画面 */
-    setTimeout(() => finish(VDATA.has(id)), 20000);
+    const start = () => {
+      attempt++;
+      const s = document.createElement('script');
+      /* 重试时加参数绕过可能已损坏的缓存 */
+      s.src = VEH_SRC + id + '.js' + (attempt > 1 ? '?retry=' + attempt : '');
+      s.async = true;
+      let done = false, timer = 0;
 
-    VDATA_SCRIPT.set(id, s);
-    document.head.appendChild(s);
+      const ok = () => {
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        if(VDATA.has(id)) settle(true);
+        else fail('数据未注册');
+      };
+      const fail = (why) => {
+        if(done) return;
+        done = true;
+        clearTimeout(timer);
+        if(s.parentNode) s.parentNode.removeChild(s);
+        VDATA_SCRIPT.delete(id);
+        /* 大文件 + 慢网：超时/失败自动重试一次 */
+        if(attempt < 2){ start(); return; }
+        settle(false);
+      };
+
+      /* 载具数据文件可达 20 MB，慢网下 20 s 根本不够 */
+      timer = setTimeout(() => { if(VDATA.has(id)) ok(); else fail('超时'); }, 120000);
+
+      s.onload = ok;
+      s.onerror = () => fail('error');
+
+      VDATA_SCRIPT.set(id, s);
+      document.head.appendChild(s);
+    };
+
+    start();
   });
-
   VDATA_WAIT.set(id, p);
   p.catch(() => {});                 // 调用处会自己 catch，这里避免未处理拒绝
   return p;
