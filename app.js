@@ -2241,10 +2241,32 @@ uniform mat4 uVP, uLightVPNear, uLightVPFar, uModel;
 uniform float uPosScale, uUvScale;
 uniform vec2 uUvShift;
 
+/* 履带按 z 方向的地形/悬挂偏移弯曲：uTrackP = (局部 z, 偏移) */
+uniform vec2 uTrackP[8];
+uniform int uTrackN;
+uniform float uTrackDeform;
+
 out vec3 vPos; out vec3 vNrm; out vec2 vUV; out vec3 vLocal; out vec4 vLightNear; out vec4 vLightFar;
+
+float trackOffset(float z){
+  if(uTrackDeform < 0.5 || uTrackN < 2) return 0.0;
+  float y = uTrackP[0].y;
+  for(int i = 1; i < 8; i++){
+    if(i >= uTrackN) break;
+    vec2 a = uTrackP[i - 1], b = uTrackP[i];
+    if(z <= a.x){ y = a.y; break; }
+    if(z <= b.x){
+      y = mix(a.y, b.y, (z - a.x) / max(0.001, b.x - a.x));
+      break;
+    }
+    y = b.y;
+  }
+  return y;
+}
 
 void main(){
   vec3 lp = aPos * uPosScale;
+  lp.y += trackOffset(lp.z);
   vec4 wp = uModel * vec4(lp, 1.0);
   vec3 wn = mat3(uModel) * aNrm;
   vPos = wp.xyz;
@@ -2374,7 +2396,29 @@ const VS_MODEL_DEPTH = `
 layout(location=0) in vec3 aPos;
 uniform mat4 uLightVP, uModel;
 uniform float uPosScale;
-void main(){ gl_Position = uLightVP * uModel * vec4(aPos * uPosScale, 1.0); }`;
+uniform vec2 uTrackP[8];
+uniform int uTrackN;
+uniform float uTrackDeform;
+float trackOffset(float z){
+  if(uTrackDeform < 0.5 || uTrackN < 2) return 0.0;
+  float y = uTrackP[0].y;
+  for(int i = 1; i < 8; i++){
+    if(i >= uTrackN) break;
+    vec2 a = uTrackP[i - 1], b = uTrackP[i];
+    if(z <= a.x){ y = a.y; break; }
+    if(z <= b.x){
+      y = mix(a.y, b.y, (z - a.x) / max(0.001, b.x - a.x));
+      break;
+    }
+    y = b.y;
+  }
+  return y;
+}
+void main(){
+  vec3 lp = aPos * uPosScale;
+  lp.y += trackOffset(lp.z);
+  gl_Position = uLightVP * uModel * vec4(lp, 1.0);
+}`;
 
 const pModel      = program(VS_MODEL, FS_MODEL);
 const pModelDepth = program(VS_MODEL_DEPTH, FS_DEPTH);
@@ -2693,6 +2737,35 @@ function modelVisible(part){
   return !HIDE.has('wheels');
 }
 
+/* 履带弯曲 profile：按模型轮子的 z 和当前的悬挂位移生成 (z, dy)。
+   和车轮视觉行程用同一个公式，所以履带会跟着轮子过坎。 */
+const _trackP = new Float32Array(16);
+function trackProfile(P, mats, side){
+  const M = P.meta;
+  if(!M || !M.wheels) return null;
+  const vm = mats.vehM;
+  const list = [];
+  for(const w of M.wheels){
+    if(!w || w.r < 0.15) continue;
+    if((w.side > 0 ? 1 : -1) !== side) continue;
+    const cx = w.c[0], cy = w.c[1], cz = w.c[2];
+    const wx = vm[0]*cx + vm[4]*cy + vm[8]*cz + vm[12];
+    const wy = vm[1]*cx + vm[5]*cy + vm[9]*cz + vm[13];
+    const wz = vm[2]*cx + vm[6]*cy + vm[10]*cz + vm[14];
+    let dy = (groundH(wx, wz) + cy) - wy;
+    if(dy > 0.18) dy = 0.18; else if(dy < -0.18) dy = -0.18;
+    list.push([cz, dy]);
+  }
+  if(list.length < 2) return null;
+  list.sort((a, b) => a[0] - b[0]);
+  if(list.length > 8){
+    const out = [];
+    for(let i = 0; i < 8; i++) out.push(list[Math.round(i * (list.length - 1) / 7)]);
+    return out;
+  }
+  return list;
+}
+
 /* ============================ 绘制 ============================ */
 /*  本地车和远端玩家都走这里：P 是车型实例，mats 是该实体这一帧的矩阵。 */
 function drawModelScene(P, mats, travelL, travelR, trackDir){
@@ -2723,6 +2796,9 @@ function drawModelScene(P, mats, travelL, travelR, trackDir){
   setFlashLights(U);
   setShadowUniforms(U);
 
+  const trkL = trackProfile(P, mats, 1);
+  const trkR = trackProfile(P, mats, -1);
+
   gl.bindVertexArray(P.vao);
   for(const m of M.meshes){
     if(!modelVisible(m.part)) continue;
@@ -2731,6 +2807,22 @@ function drawModelScene(P, mats, travelL, travelR, trackDir){
     const sh = modelUvShift(m.part, P, travelL, travelR, trackDir);
     if(sh) gl.uniform2f(U.uUvShift, sh[0], sh[1]);
     else   gl.uniform2f(U.uUvShift, 0, 0);
+
+    /* 履带按轮位 profile 弯曲；其它部件不弯 */
+    const isTrack = m.part === 'trackL' || m.part === 'trackR';
+    const prof = isTrack ? (m.part === 'trackL' ? trkL : trkR) : null;
+    if(prof && prof.length >= 2){
+      const n = Math.min(8, prof.length);
+      for(let k = 0; k < n; k++){
+        _trackP[k*2]     = prof[k][0];
+        _trackP[k*2 + 1] = prof[k][1];
+      }
+      if(U.uTrackP) gl.uniform2fv(U.uTrackP, _trackP);
+      if(U.uTrackN) gl.uniform1i(U.uTrackN, n);
+      if(U.uTrackDeform) gl.uniform1f(U.uTrackDeform, 1);
+    }else if(U.uTrackDeform){
+      gl.uniform1f(U.uTrackDeform, 0);
+    }
 
     const mt = M.mats[m.mat];
     gl.uniform1f(U.uRough, P.rough[m.mat]);
@@ -2756,10 +2848,26 @@ function drawModelDepth(P, mats, travelL, travelR){
   gl.useProgram(pModelDepth.p);
   gl.uniformMatrix4fv(U.uLightVP, false, lightVP);
   gl.uniform1f(U.uPosScale, 1 / M.posScale);
+  const trkL = trackProfile(P, mats, 1);
+  const trkR = trackProfile(P, mats, -1);
   gl.bindVertexArray(P.vao);
   for(const m of M.meshes){
     if(!modelVisible(m.part)) continue;
     gl.uniformMatrix4fv(U.uModel, false, modelPartMat(m.part, P, mats, travelL, travelR));
+    const isTrack = m.part === 'trackL' || m.part === 'trackR';
+    const prof = isTrack ? (m.part === 'trackL' ? trkL : trkR) : null;
+    if(prof && prof.length >= 2){
+      const n = Math.min(8, prof.length);
+      for(let k = 0; k < n; k++){
+        _trackP[k*2]     = prof[k][0];
+        _trackP[k*2 + 1] = prof[k][1];
+      }
+      if(U.uTrackP) gl.uniform2fv(U.uTrackP, _trackP);
+      if(U.uTrackN) gl.uniform1i(U.uTrackN, n);
+      if(U.uTrackDeform) gl.uniform1f(U.uTrackDeform, 1);
+    }else if(U.uTrackDeform){
+      gl.uniform1f(U.uTrackDeform, 0);
+    }
     gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, m.start * 4);
   }
   gl.bindVertexArray(null);
