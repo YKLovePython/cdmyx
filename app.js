@@ -2865,26 +2865,37 @@ void main(){
 
 const FS_COMP = LIB + `
 in vec2 vUV;
-uniform sampler2D uScene, uBloom, uGod, uAO;
-uniform float uTime, uBloomAmt, uGodAmt, uExposure, uAOAmt;
+uniform sampler2D uScene, uBloom, uGod, uAO, uExposureTex;
+uniform float uTime, uBloomAmt, uGodAmt, uExposure, uAOAmt, uSharp;
+uniform vec2 uTexel;
 uniform int uDebug;
 out vec4 fragColor;
 void main(){
+  /* 曝光纹理是 1×1：自动曝光的结果（关掉时恒为 1）；uExposure 是手动微调 */
+  float expo = texelFetch(uExposureTex, ivec2(0, 0), 0).r * uExposure;
   vec3 c = texture(uScene, vUV).rgb;
+  /* 锐化：抵消 TAA 亚像素积累带来的细节损失（TAA + sharpen 是标准搭配） */
+  if(uSharp > 0.001){
+    vec3 nb = texture(uScene, vUV + vec2(uTexel.x, 0.0)).rgb
+            + texture(uScene, vUV - vec2(uTexel.x, 0.0)).rgb
+            + texture(uScene, vUV + vec2(0.0, uTexel.y)).rgb
+            + texture(uScene, vUV - vec2(0.0, uTexel.y)).rgb;
+    c += (c - nb * 0.25) * uSharp;
+  }
   vec3 bl = texture(uBloom, vUV).rgb;
   vec3 gr = texture(uGod, vUV).rgb;
   float ao = texture(uAO, vUV).r;
 
-  if(uDebug == 1){ fragColor = vec4(pow(aces(c*uExposure), vec3(1.0/2.2)), 1.0); return; }
+  if(uDebug == 1){ fragColor = vec4(pow(aces(c*expo), vec3(1.0/2.2)), 1.0); return; }
   if(uDebug == 2){ fragColor = vec4(pow(aces(gr*3.0), vec3(1.0/2.2)), 1.0); return; }
   if(uDebug == 3){ fragColor = vec4(pow(aces(bl*4.0), vec3(1.0/2.2)), 1.0); return; }
   if(uDebug == 4){ fragColor = vec4(vec3(ao), 1.0); return; }
-  if(uDebug == 5){ fragColor = vec4(pow(aces(c*uExposure), vec3(1.0/2.2)), 1.0); return; }
+  if(uDebug == 5){ fragColor = vec4(pow(aces(c*expo), vec3(1.0/2.2)), 1.0); return; }
 
   c *= mix(1.0, ao, uAOAmt);
   c += bl * uBloomAmt;
   c += gr * uGodAmt;
-  c *= uExposure;
+  c *= expo;
   c = aces(c);
 
   vec2 q = vUV - 0.5;
@@ -2984,6 +2995,119 @@ const FS_MARK = `
 in float vA;
 out vec4 fragColor;
 void main(){ fragColor = vec4(vec3(0.105, 0.088, 0.070), vA * 0.22); }`;
+
+/* ============================ TAA ============================ */
+/*  相机每帧抖动半个像素，用上一帧的深度反投到当前像素，做邻域钳制后积累。
+   没有运动矢量，所以靠 3×3 包围盒吃掉移动物体（车、靶标、特效）的拖影。 */
+const FS_TAA = LIB + `
+in vec2 vUV;
+uniform sampler2D uScene, uDepth, uHist;
+uniform mat4 uInvVP, uPrevVP;
+uniform vec2 uTexel;
+uniform float uBlend, uReset, uDbg;
+out vec4 fragColor;
+
+/* 5 抽头 Catmull-Rom：双线性采样历史会一帧一帧地累积模糊，换成锐利重采样 */
+vec3 histCR(vec2 uv, vec2 texSize){
+  vec2 sp = uv * texSize;
+  vec2 tp = floor(sp - 0.5) + 0.5;
+  vec2 f = sp - tp;
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+  vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+  vec2 w3 = f * f * (-0.5 + 0.5 * f);
+  vec2 w12 = w1 + w2;
+  vec2 off = w2 / w12;
+  vec2 t0 = (tp - 1.0) / texSize;
+  vec2 t3 = (tp + 2.0) / texSize;
+  vec2 t12 = (tp + off) / texSize;
+  return texture(uHist, vec2(t12.x, t0.y)).rgb * (w12.x * w0.y)
+       + texture(uHist, vec2(t0.x, t12.y)).rgb * (w0.x * w12.y)
+       + texture(uHist, vec2(t12.x, t12.y)).rgb * (w12.x * w12.y)
+       + texture(uHist, vec2(t3.x, t12.y)).rgb * (w3.x * w12.y)
+       + texture(uHist, vec2(t12.x, t3.y)).rgb * (w12.x * w3.y);
+}
+
+void main(){
+  vec3 cur = texture(uScene, vUV).rgb;
+
+  /* 邻域包围盒：把历史钳回当前帧的颜色范围 */
+  vec3 mn = cur, mx = cur;
+  for(int y = -1; y <= 1; y++){
+    for(int x = -1; x <= 1; x++){
+      if(x == 0 && y == 0) continue;
+      vec3 s = texture(uScene, vUV + vec2(float(x), float(y)) * uTexel).rgb;
+      mn = min(mn, s); mx = max(mx, s);
+    }
+  }
+
+  /* 当前帧深度 → 世界坐标 → 上一帧屏幕位置 */
+  float d = texture(uDepth, vUV).r;
+  vec4 wp = uInvVP * vec4(vUV * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+  wp /= wp.w;
+  vec4 pc = uPrevVP * wp;
+  vec2 puv = pc.xy / max(abs(pc.w), 1e-5) * 0.5 + 0.5;
+  puv.y = pc.w > 0.0 ? puv.y : -1.0;
+
+  bool ok = puv.x > 0.001 && puv.x < 0.999 && puv.y > 0.001 && puv.y < 0.999;
+  if(uDbg > 0.5){ fragColor = vec4(puv.x, puv.y, d, ok ? 1.0 : 0.0); return; }
+  vec3 hist = ok ? clamp(histCR(puv, 1.0 / uTexel), mn, mx) : cur;
+
+  float w = ok ? uBlend : 1.0;
+  if(d > 0.9999) w = max(w, 0.55);      /* 天空：反投不完全可靠，少用一点历史 */
+  w = mix(w, 1.0, uReset);
+  fragColor = vec4(mix(hist, cur, w), 1.0);
+}`;
+
+/* ---- 自动曝光：全屏 → 64² 的对数亮度 ---- */
+const FS_LUM = LIB + `
+in vec2 vUV;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+out vec4 fragColor;
+void main(){
+  vec3 c = texture(uSrc, vUV + uTexel * vec2(-1.0, -1.0)).rgb
+         + texture(uSrc, vUV + uTexel * vec2( 1.0, -1.0)).rgb
+         + texture(uSrc, vUV + uTexel * vec2(-1.0,  1.0)).rgb
+         + texture(uSrc, vUV + uTexel * vec2( 1.0,  1.0)).rgb;
+  float l = max(dot(c * 0.25, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+  fragColor = vec4(log(l), 0.0, 0.0, 1.0);
+}`;
+
+/* ---- 自动曝光：8×8 逐级平均 ---- */
+const FS_LUMAVG = LIB + `
+in vec2 vUV;
+uniform sampler2D uSrc;
+uniform vec2 uSrcTexel;
+out vec4 fragColor;
+void main(){
+  float s = 0.0;
+  for(int y = 0; y < 8; y++){
+    for(int x = 0; x < 8; x++){
+      s += texture(uSrc, vUV + (vec2(float(x), float(y)) - 3.5) * uSrcTexel).r;
+    }
+  }
+  fragColor = vec4(s / 64.0, 0.0, 0.0, 1.0);
+}`;
+
+/* ---- 自动曝光：时间平滑，输出 1×1（r=曝光系数, g=基准亮度） ---- */
+const FS_ADAPT = LIB + `
+in vec2 vUV;
+uniform sampler2D uAvg, uPrev;
+uniform float uDt, uTauFast, uTauSlow, uTauKey, uMin, uMax, uReset;
+out vec4 fragColor;
+void main(){
+  float avg = exp(texelFetch(uAvg, ivec2(0, 0), 0).r);
+  vec4 prev = texelFetch(uPrev, ivec2(0, 0), 0);
+  /* 基准亮度自己缓慢跟着平均值走：长期曝光恒为 1，只在突变（炮口爆闪、进出阴影）时动 */
+  float key = uReset > 0.5 ? avg : prev.g;
+  key = mix(key, avg, 1.0 - exp(-uDt / uTauKey));
+  float want = clamp(key / max(avg, 1e-3), uMin, uMax);
+  float ep = uReset > 0.5 ? 1.0 : prev.r;
+  float tau = want < ep ? uTauFast : uTauSlow;      /* 变亮收得快，变暗放得慢 */
+  float e = mix(ep, want, 1.0 - exp(-uDt / tau));
+  fragColor = vec4(clamp(e, uMin, uMax), key, 0.0, 1.0);
+}`;
 
 /* ===================== 55_combat.js ===================== */
 /* ============================ 武器 · 弹道 · 命中 ============================ */
@@ -3560,10 +3684,29 @@ const pDust    = program(VS_DUST, FS_DUST);
 const pMark    = program(VS_MARK, FS_MARK);
 const pEnv     = program(VS_FULL, FS_ENV_FACE);
 const pSandGen = program(VS_FULL, FS_GEN_SAND);
+const pTAA     = program(VS_FULL, FS_TAA);
+const pLum     = program(VS_FULL, FS_LUM);
+const pLumAvg  = program(VS_FULL, FS_LUMAVG);
+const pAdapt   = program(VS_FULL, FS_ADAPT);
 
 const RT_FMT = FLOAT_RT
   ? {internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT}
   : {internal: gl.RGBA8,   format: gl.RGBA, type: gl.UNSIGNED_BYTE};
+
+/* 时间抗锯齿 / 自动曝光：?notaa / ?autoexp=0 可单独关掉排查 */
+const TAA_ON   = !Q.has('notaa');
+const AUTO_EXP = FLOAT_RT && Q.get('autoexp') !== '0';
+
+/* 恒定 1.0 的 1×1 纹理：关掉自动曝光时喂给合成着色器，省一个分支 */
+const texOne = (() => {
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([255, 255, 255, 255]));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return t;
+})();
 
 /* ---- 两级阴影贴图：近处 28m 高分辨率，远处 92m ---- */
 const shadowSizeNear = QUAL.shadow;
@@ -3596,6 +3739,15 @@ let sceneMSFBO = null, sceneMSColor = null, sceneMSDepth = null, msaaSamples = 0
 let bloomA, bloomB, bloomFA, bloomFB;
 let aoTex, aoTex2, aoFBO, aoFBO2;
 let aoW = 1, aoH = 1;
+
+/* ---- TAA 历史（双缓冲） ---- */
+let taaTex = [null, null], taaFBOs = [null, null];
+let taaIdx = 0, taaScr = null, taaReset = true;
+/* ---- 自动曝光的小目标（64² → 8² → 1²）+ 1×1 曝光双缓冲 ---- */
+let lum64, lum8, lum1, lum64FBO, lum8FBO, lum1FBO;
+let expTex = [null, null], expFBO = [null, null], expIdx = 0, expReset = true;
+let prevVP = null, prevCamPos = null, prevFov = null;   /* TAA 反投用 */
+let jitX = 0, jitY = 0, jitN = 0;
 
 function allocTargets(){
   const del = (o) => { if(o && gl.isTexture(o)) gl.deleteTexture(o); };
@@ -3654,6 +3806,33 @@ function allocTargets(){
   bloomB = texture(bw, bh, RT_FMT.internal, RT_FMT.format, RT_FMT.type, gl.LINEAR);
   bloomFA = fbo([bloomA]);
   bloomFB = fbo([bloomB]);
+
+  /* ---- TAA 历史缓冲（窗口尺寸变化 → 重建并清历史） ---- */
+  for(let i = 0; i < 2; i++){
+    del(taaTex[i]);
+    if(taaFBOs[i]) gl.deleteFramebuffer(taaFBOs[i]);
+    taaTex[i] = texture(W, H, RT_FMT.internal, RT_FMT.format, RT_FMT.type, gl.LINEAR);
+    taaFBOs[i] = fbo([taaTex[i]]);
+  }
+  taaIdx = 0; taaScr = sceneTex; taaReset = true;
+  prevVP = null; prevCamPos = null; prevFov = null;
+
+  /* ---- 自动曝光链 ---- */
+  del(lum64); del(lum8); del(lum1); del(expTex[0]); del(expTex[1]);
+  if(lum64FBO) gl.deleteFramebuffer(lum64FBO);
+  if(lum8FBO)  gl.deleteFramebuffer(lum8FBO);
+  if(lum1FBO)  gl.deleteFramebuffer(lum1FBO);
+  if(expFBO[0]) gl.deleteFramebuffer(expFBO[0]);
+  if(expFBO[1]) gl.deleteFramebuffer(expFBO[1]);
+  lum64 = texture(64, 64, RT_FMT.internal, RT_FMT.format, RT_FMT.type, gl.LINEAR);
+  lum8  = texture(8, 8, RT_FMT.internal, RT_FMT.format, RT_FMT.type, gl.LINEAR);
+  lum1  = texture(1, 1, RT_FMT.internal, RT_FMT.format, RT_FMT.type, gl.NEAREST);
+  for(let i = 0; i < 2; i++){
+    expTex[i] = texture(1, 1, RT_FMT.internal, RT_FMT.format, RT_FMT.type, gl.NEAREST);
+    expFBO[i] = fbo([expTex[i]]);
+  }
+  lum64FBO = fbo([lum64]); lum8FBO = fbo([lum8]); lum1FBO = fbo([lum1]);
+  expIdx = 0; expReset = true;
 }
 
 function resize(){
@@ -5072,6 +5251,34 @@ function draw(){
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
   }
 
+  /* ---------- 3.5 时间抗锯齿（TAA） ---------- */
+  taaScr = sceneTex;
+  if(TAA_ON && showMode === 0){
+    const wIdx = 1 - taaIdx;                       /* 写另一个缓冲，读上一帧那个 */
+    gl.disable(gl.BLEND);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(pTAA.p);
+    tex(0, sceneTex, pTAA.u.uScene);
+    tex(1, sceneDepth, pTAA.u.uDepth);
+    tex(2, taaTex[taaIdx], pTAA.u.uHist);
+    gl.uniformMatrix4fv(pTAA.u.uInvVP, false, INV_VP);
+    gl.uniformMatrix4fv(pTAA.u.uPrevVP, false, prevVP || VP);
+    gl.uniform2f(pTAA.u.uTexel, 1.0 / W, 1.0 / H);
+    /* 有 MSAA 时几何边缘已经干净，TAA 只做轻度时间稳定；没有 MSAA 就让它多积累 */
+    const spd = Math.min(1, Math.abs((car.vL + car.vR) * 0.5) * 0.07);
+    let taaBlend = (msaaSamples > 0 ? 0.22 : 0.12) + 0.06 * spd;
+    if(Q.has('taab')) taaBlend = clamp(+Q.get('taab') || 0, 0, 1);   /* 调试：?taab=1 只用当前帧 */
+    gl.uniform1f(pTAA.u.uBlend, taaBlend);
+    gl.uniform1f(pTAA.u.uReset, taaReset ? 1.0 : 0.0);
+    if(pTAA.u.uDbg) gl.uniform1f(pTAA.u.uDbg, Q.has('taadbg') ? 1.0 : 0.0);
+    bindFS(taaFBOs[wIdx], W, H);
+    drawFull();
+    gl.enable(gl.DEPTH_TEST);
+    taaIdx = wIdx;
+    taaScr = taaTex[taaIdx];
+    taaReset = false;
+  }
+
   /* ---------- 4. SSAO ---------- */
   if(QUAL.ssao && !NOAO && showMode === 0){
     gl.disable(gl.BLEND);
@@ -5109,7 +5316,7 @@ function draw(){
   if(QUAL.bloom && showMode === 0){
     gl.disable(gl.DEPTH_TEST);
     gl.useProgram(pBright.p);
-    tex(0, sceneTex, pBright.u.uSrc);
+    tex(0, taaScr, pBright.u.uSrc);
     gl.uniform2f(pBright.u.uTexel, 0.5/W, 0.5/H);
     bindFS(bloomFA, bw, bh);
     drawFull();
@@ -5142,42 +5349,131 @@ function draw(){
     gl.enable(gl.DEPTH_TEST);
   }
 
+  /* ---------- 6.5 自动曝光 ---------- */
+  let expoTex = null;
+  if(AUTO_EXP){
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+
+    /* 全屏 → 64²：每个 texel 存 log 亮度 */
+    gl.useProgram(pLum.p);
+    tex(0, taaScr, pLum.u.uSrc);
+    gl.uniform2f(pLum.u.uTexel, 1.0 / W, 1.0 / H);
+    bindFS(lum64FBO, 64, 64);
+    drawFull();
+
+    /* 64² → 8² → 1² */
+    gl.useProgram(pLumAvg.p);
+    tex(0, lum64, pLumAvg.u.uSrc);
+    gl.uniform2f(pLumAvg.u.uSrcTexel, 1.0 / 64, 1.0 / 64);
+    bindFS(lum8FBO, 8, 8);
+    drawFull();
+    tex(0, lum8, pLumAvg.u.uSrc);
+    gl.uniform2f(pLumAvg.u.uSrcTexel, 1.0 / 8, 1.0 / 8);
+    bindFS(lum1FBO, 1, 1);
+    drawFull();
+
+    gl.useProgram(pAdapt.p);
+    tex(0, lum1, pAdapt.u.uAvg);
+    tex(1, expTex[expIdx], pAdapt.u.uPrev);
+    gl.uniform1f(pAdapt.u.uDt, lastDt > 0 ? lastDt : 1/60);
+    gl.uniform1f(pAdapt.u.uTauFast, 0.35);
+    gl.uniform1f(pAdapt.u.uTauSlow, 1.6);
+    gl.uniform1f(pAdapt.u.uTauKey, 4.0);
+    gl.uniform1f(pAdapt.u.uMin, 0.80);
+    gl.uniform1f(pAdapt.u.uMax, 1.25);
+    gl.uniform1f(pAdapt.u.uReset, expReset ? 1.0 : 0.0);
+    bindFS(expFBO[1 - expIdx], 1, 1);
+    drawFull();
+    expIdx = 1 - expIdx;
+    expReset = false;
+    expoTex = expTex[expIdx];
+    gl.enable(gl.DEPTH_TEST);
+  }
+
   /* ---------- 7. 合成 ---------- */
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0, 0, W, H);
   gl.disable(gl.DEPTH_TEST);
   gl.useProgram(pComp.p);
-  tex(0, sceneTex, pComp.u.uScene);
+  tex(0, taaScr, pComp.u.uScene);
   tex(1, bloomA, pComp.u.uBloom);
   tex(2, godTex, pComp.u.uGod);
   tex(3, aoTex, pComp.u.uAO);
+  /* 没有自动曝光时用一张恒为 1 的 1×1 纹理，着色器里不用分支 */
+  if(expoTex) tex(4, expoTex, pComp.u.uExposureTex);
+  else { gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, texOne); gl.uniform1i(pComp.u.uExposureTex, 4); }
   gl.uniform1f(pComp.u.uTime, simT);
   gl.uniform1f(pComp.u.uBloomAmt, 0.55);
   gl.uniform1f(pComp.u.uGodAmt, 0.40);
   gl.uniform1f(pComp.u.uExposure, 1.06);
   gl.uniform1f(pComp.u.uAOAmt, QUAL.ssao && !NOAO ? 0.72 : 0.0);
+  /* TAA 之后补一点锐化；低渲染比例时多补一点 */
+  let sharp = QUAL.scale < 0.9 ? 0.60 : 0.45;
+  if(Q.has('sharp')) sharp = Math.max(0, Math.min(1.5, +Q.get('sharp') || 0));
+  if(!TAA_ON) sharp *= 0.30;
+  gl.uniform1f(pComp.u.uSharp, sharp);
+  gl.uniform2f(pComp.u.uTexel, 1.0 / W, 1.0 / H);
   gl.uniform1i(pComp.u.uDebug, DEBUG_PASS);
   drawFull();
   gl.enable(gl.DEPTH_TEST);
 
   frameCount++;
+
+  /* 记录这一帧的相机状态，供下一帧 TAA 反投 */
+  prevVP = VP;
+  prevCamPos = [cam.pos[0], cam.pos[1], cam.pos[2]];
+  prevFov = cam.fov;
 }
 
 let frameCount = 0;
-let VP = null, VIEW = null, PROJ = null, INV_PROJ = null;
+let lastDt = 1/60;
+let VP = null, VIEW = null, PROJ = null, INV_PROJ = null, INV_VP = null;
+
+/* Halton(2,3) 抖动序列：每帧落在一个不同的子像素位置，TAA 负责把它们合成干净边缘 */
+const HALTON = (() => {
+  const base = (n, b) => { let f = 1, r = 0; while(n > 0){ f /= b; r += f * (n % b); n = Math.floor(n / b); } return r; };
+  const a = [];
+  for(let i = 1; i <= 16; i++) a.push([base(i, 2), base(i, 3)]);
+  return a;
+})();
 
 function updateCamMatrices(){
   const asp = W/H;
   PROJ = M4.perspective(cam.fov * Math.PI/180, asp, 0.15, 3000);
+
+  if(TAA_ON && !Q.has('nojit')){
+    const h = HALTON[jitN];
+    jitN = (jitN + 1) % HALTON.length;
+    jitX = h[0] - 0.5;                 /* -0.5 .. +0.5 像素 */
+    jitY = h[1] - 0.5;
+    PROJ[8] -= jitX * 2 / W;           /* 投影矩阵的 z→x / z→y 项 = 屏幕空间平移 */
+    PROJ[9] -= jitY * 2 / H;
+  }else{
+    jitX = 0; jitY = 0;
+  }
+
   VIEW = M4.lookAt(cam.pos,
     [cam.pos[0]+cam.fwd[0], cam.pos[1]+cam.fwd[1], cam.pos[2]+cam.fwd[2]],
     cam.up);
   VP = M4.mul(PROJ, VIEW);
   INV_PROJ = M4.invert(PROJ);
+  INV_VP = M4.invert(VP);
+
+  /* 相机瞬移 / 换镜（FOV 突变）→ 上一帧的画面已经对不上了，丢掉历史 */
+  if(!prevVP){ taaReset = true; }
+  else{
+    if(prevFov !== null && Math.abs(cam.fov - prevFov) > 0.02) taaReset = true;
+    if(prevCamPos){
+      const dx = cam.pos[0]-prevCamPos[0], dy = cam.pos[1]-prevCamPos[1], dz = cam.pos[2]-prevCamPos[2];
+      if(dx*dx + dy*dy + dz*dz > 9.0) taaReset = true;
+    }
+  }
 }
 
 /* ============================ K 帧 ============================ */
 function step(dt){
+  lastDt = dt;
   simT += dt;
   netTick(dt);
   updateSim(simT, dt);
