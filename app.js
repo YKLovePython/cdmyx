@@ -194,7 +194,7 @@ function depthTex(w,h){
 /* ============================ 着色器库 ============================ */
 const LIB = `
 #define PI 3.14159265359
-const vec3 SUN_DIR = normalize(vec3(0.58, 0.375, -0.72));
+const vec3 SUN_DIR = normalize(vec3(0.58, 0.375, 0.72));
 const vec3 SUN_COL = vec3(1.0, 0.80, 0.58) * 5.2;
 const vec3 SKY_AMB = vec3(0.30, 0.40, 0.60);
 
@@ -226,7 +226,7 @@ vec3 sky(vec3 d, float withSun, float t){
 
   vec3 zen = vec3(0.028, 0.072, 0.158);
   vec3 mid = vec3(0.195, 0.262, 0.330);
-  vec3 hor = mix(vec3(0.470, 0.352, 0.246), vec3(0.760, 0.500, 0.290), pow(ts, 3.0));
+  vec3 hor = mix(vec3(0.420, 0.460, 0.440), vec3(0.780, 0.680, 0.520), pow(ts, 3.0));
   vec3 col = mix(hor, mid, smoothstep(0.0, 0.18, h));
   col = mix(col, zen, smoothstep(0.12, 0.82, h));
 
@@ -258,8 +258,8 @@ vec3 sky(vec3 d, float withSun, float t){
   // 太阳圆盘（环境采样时关闭）
   col += vec3(1.0, 0.82, 0.58) * smoothstep(0.99972, 0.99994, sd) * 26.0 * withSun;
 
-  // 地平线以下的沙尘雾
-  col = mix(col, vec3(0.52, 0.40, 0.32), smoothstep(0.015, -0.20, d.y));
+  // 地平线以下的霾
+  col = mix(col, vec3(0.40, 0.44, 0.42), smoothstep(0.015, -0.20, d.y));
   return col;
 }
 
@@ -396,6 +396,49 @@ uniform mat4 uLightVP;
 uniform mat4 uModel;
 void main(){ gl_Position = uLightVP * uModel * vec4(aPos, 1.0); }`;
 const FS_DEPTH = `void main(){}`;
+
+/* ---- 实例化（CC0 房屋）：顶点属性同物体，附加每实例的 位置/旋转/缩放 ---- */
+const VS_OBJ_INST = `
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNrm;
+layout(location=2) in vec3 aCol;
+layout(location=3) in vec3 aMat;
+layout(location=4) in float aPart;
+layout(location=5) in vec4 aIInst;   // x, y, z, rotY
+layout(location=6) in vec2 aIScale;  // sx, sz
+
+uniform mat4 uVP, uLightVPNear, uLightVPFar, uModel;
+
+out vec3 vPos; out vec3 vNrm; out vec3 vCol; out vec3 vMat;
+out vec3 vLocal; out float vPart; out vec4 vLightNear; out vec4 vLightFar;
+
+void main(){
+  float c = cos(aIInst.w), s = sin(aIInst.w);
+  vec3 p = aPos * vec3(aIScale.x, aIScale.x, aIScale.y);
+  p = vec3(p.x*c + p.z*s, p.y, -p.x*s + p.z*c);
+  vec3 n = vec3(aNrm.x*c + aNrm.z*s, aNrm.y, -aNrm.x*s + aNrm.z*c);
+  vec4 wp = uModel * vec4(p + aIInst.xyz, 1.0);
+  vPos = wp.xyz;
+  vNrm = mat3(uModel) * n;
+  vCol = aCol; vMat = aMat; vLocal = aPos; vPart = aPart;
+  vec4 wps = vec4(wp.xyz + normalize(vNrm) * 0.05, 1.0);
+  vLightNear = uLightVPNear * wps;
+  vLightFar  = uLightVPFar  * wps;
+  gl_Position = uVP * wp;
+}`;
+
+const VS_DEPTH_INST = `
+layout(location=0) in vec3 aPos;
+layout(location=5) in vec4 aIInst;
+layout(location=6) in vec2 aIScale;
+uniform mat4 uLightVP;
+uniform mat4 uModel;
+void main(){
+  float c = cos(aIInst.w), s = sin(aIInst.w);
+  vec3 p = aPos * vec3(aIScale.x, aIScale.x, aIScale.y);
+  p = vec3(p.x*c + p.z*s, p.y, -p.x*s + p.z*c);
+  gl_Position = uLightVP * uModel * vec4(p + aIInst.xyz, 1.0);
+}`;
 
 /* ---- 不透明物体 ---- */
 const VS_OBJ = `
@@ -660,6 +703,70 @@ void main(){
   col += base * amb;
 
   /* 炮口焰 / 爆炸的动态光 */
+  col += base * flashLight(N, vPos, V, rough);
+
+  vec3 toCam = vPos - uCam;
+  float d = length(toCam);
+  vec3 fogC = sky(normalize(toCam), 0.0, uTime);
+  float fog = 1.0 - exp2(-pow(d * 0.0012, 1.45));
+  col = mix(col, fogC, clamp(fog, 0.0, 0.92));
+
+  fragColor = vec4(col, 1.0);
+}`;
+
+/* ---- 地图地形：高度网格 + 地面贴图（R 植被 / G 道路 / B 林地 / A 高度） ---- */
+const VS_MAPTERRAIN = `
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNrm;
+uniform mat4 uVP, uLightVPNear, uLightVPFar;
+out vec3 vPos; out vec3 vNrm; out vec4 vLightNear; out vec4 vLightFar;
+void main(){
+  vPos = aPos; vNrm = aNrm;
+  vLightNear = uLightVPNear * vec4(aPos, 1.0);
+  vLightFar  = uLightVPFar  * vec4(aPos, 1.0);
+  gl_Position = uVP * vec4(aPos, 1.0);
+}`;
+
+const FS_MAPTERRAIN = LIB + `
+in vec3 vPos; in vec3 vNrm; in vec4 vLightNear; in vec4 vLightFar;
+uniform samplerCube uEnv;
+uniform sampler2D uMapTex;
+uniform sampler2D uDetail;
+uniform vec3 uCam;
+uniform float uTime, uShadowOn, uEnvLod, uHalfM, uHmin, uHmax, uDetailDist;
+uniform int uShow;
+out vec4 fragColor;
+
+void main(){
+  vec2 p = vPos.xz;
+  float dist = length(uCam.xz - p);
+  vec2 uv = (p + uHalfM) / (2.0 * uHalfM);
+  vec4 mt = texture(uMapTex, uv);
+
+  /* 地面底色：草地/农田 → 林地 → 道路 */
+  vec3 field = mix(vec3(0.240, 0.210, 0.105), vec3(0.145, 0.220, 0.078), mt.r);
+  vec3 base = mix(field, vec3(0.068, 0.118, 0.050), smoothstep(0.30, 0.75, mt.b));
+  base = mix(base, vec3(0.175, 0.165, 0.148), smoothstep(0.25, 0.80, mt.g));
+
+  vec3 N = normalize(vNrm);
+  float detail = 1.0 - smoothstep(uDetailDist * 0.5, uDetailDist, dist);
+  if(detail > 0.001){
+    vec3 dn = texture(uDetail, p / 0.35).rgb * 2.0 - 1.0;
+    N = normalize(N + vec3(dn.x, 0.0, dn.y) * 0.20 * detail);
+    float g = texture(uDetail, p / 0.9).a;
+    base *= 0.90 + 0.20 * g * detail;
+  }
+
+  float rough = 0.95;
+  if(uShow == 1){ fragColor = vec4(pow(base, vec3(1.0/2.2)), 1.0); return; }
+  if(uShow == 2){ fragColor = vec4(vec3(rough), 1.0); return; }
+  if(uShow == 6){ fragColor = vec4(N * 0.5 + 0.5, 1.0); return; }
+
+  vec3 V = normalize(uCam - vPos);
+  float sh = mix(1.0, shadowFactor(vLightNear, vLightFar, length(uCam - vPos)), uShadowOn);
+  vec3 col = brdf(base, rough, 0.0, N, V, SUN_DIR, SUN_COL * sh);
+  vec3 amb = textureLod(uEnv, N, uEnvLod).rgb * 0.55 + SKY_AMB * 0.5;
+  col += base * amb;
   col += base * flashLight(N, vPos, V, rough);
 
   vec3 toCam = vPos - uCam;
@@ -2565,87 +2672,576 @@ function drawModelDepth(P, mats, travelL, travelR){
 
 /* ===================== 40_world.js ===================== */
 /* ============================ 世界 ============================ */
+/*  有地图数据（MAP.ok）时：建筑 / 树木 / 道具全部按真实地形摆放；
+    没有地图数据时退回原来的程序化试验场。                        */
+
 function buildWorld(){
   const v = [];
   let pid = 200;
 
+  if(MAP.ok){
+    /* ---- 建筑（CC0 模型实例由 drawHouses 画，这里只画教堂等程序化建筑） ---- */
+    for(const b of MAP.buildings){
+      if(b.m !== undefined && b.m !== null) continue;
+      addMapBuilding(v, b, pid++);
+    }
+    pid++;
+
+    /* ---- 道路 ---- */
+    for(const r of MAP.roads){
+      if(r.cls === 'footway' || r.cls === 'path' || r.cls === 'cycleway') continue;
+      addRoadStrip(v, r.pts, Math.max(2.2, r.w * 0.7), pid);
+    }
+    pid++;
+
+    /* ---- 树 ---- */
+    for(const t of MAP.trees) addMapTree(v, t, pid++);
+    pid++;
+
+    /* ---- 岩石（避开水体，贴地） ---- */
+    for(let i = 0; i < 70; i++){
+      const a = rr(0, Math.PI * 2), d = rr(60, 420);
+      const x = Math.cos(a) * d, z = Math.sin(a) * d;
+      if(Math.abs(x) > MAP.halfM - 20 || Math.abs(z) > MAP.halfM - 20) continue;
+      const s = rr(0.35, 1.7);
+      const tone = rr(0.16, 0.30);
+      addRock(v, x, groundH(x, z) + s * 0.35, z, s, rr(0, Math.PI * 2),
+              [tone * 1.05, tone * 0.98, tone * 0.88], pid);
+    }
+    pid++;
+
+    /* ---- 靶场附近的掩体 / 油桶 ---- */
+    const R = MAP.range || { x: 0, z: 100, yaw: 0 };
+    const rc = Math.cos(R.yaw), rs = Math.sin(R.yaw);
+    const at = (ox, oz) => [R.x + ox * rc + oz * rs, R.z - ox * rs + oz * rc];
+    for(let i = 0; i < 8; i++){
+      const [x, z] = at(rr(-60, 60), rr(40, 200));
+      if(Math.abs(x) > MAP.halfM - 10 || Math.abs(z) > MAP.halfM - 10) continue;
+      const y = groundH(x, z);
+      addBox(v, x, y + 0.55, z, rr(1.6, 3.2), rr(0.7, 1.1), rr(0.8, 1.6),
+             [0.24, 0.23, 0.21], [0.85, 0.0, 1.0], pid, rr(-0.4, 0.4));
+    }
+    pid++;
+    for(let i = 0; i < 12; i++){
+      const [x, z] = at(rr(-70, 70), rr(30, 220));
+      if(Math.abs(x) > MAP.halfM - 10 || Math.abs(z) > MAP.halfM - 10) continue;
+      const y = groundH(x, z);
+      addCyl(v, [x, y, z], [x, y + 0.88, z], 0.29, 0.29, 8,
+             [0.22, 0.12, 0.08], [0.70, 0.15, 1.0], pid);
+    }
+    pid++;
+
+    /* ---- 距离标尺（沿靶场方向） ---- */
+    for(let i = 1; i <= 4; i++){
+      const [cx, cz] = at(0, i * 100);
+      if(Math.abs(cx) > MAP.halfM - 6 || Math.abs(cz) > MAP.halfM - 6) continue;
+      for(const s of [-1, 1]){
+        const [x, z] = at(s * 46, i * 100);
+        const y = groundH(x, z);
+        addBox(v, x, y + 0.9, z, 0.12, 1.8, 0.12, [0.36, 0.34, 0.28], [0.8, 0.0, 1.0], pid);
+        addBox(v, x, y + 1.65, z, 0.60, 0.34, 0.06, [0.62, 0.58, 0.42], [0.8, 0.0, 1.0], pid);
+      }
+    }
+    pid++;
+
+    return uploadMesh(v);
+  }
+
+  /* ---- 无地图：原来的程序化试验场 ---- */
   // 远山
   const RING = 220, RAD = 1250;
-  for(let i=0;i<RING;i++){
-    const a0 = i/RING*Math.PI*2, a1 = (i+1)/RING*Math.PI*2;
-    const h0 = 30 + 52*Math.sin(a0*3.1+1.2) + 26*Math.sin(a0*7.3+0.4) + 14*Math.sin(a0*13.7+2.9);
-    const h1 = 30 + 52*Math.sin(a1*3.1+1.2) + 26*Math.sin(a1*7.3+0.4) + 14*Math.sin(a1*13.7+2.9);
-    const p0 = [Math.cos(a0)*RAD, -20, Math.sin(a0)*RAD];
-    const p1 = [Math.cos(a1)*RAD, -20, Math.sin(a1)*RAD];
-    const q0 = [Math.cos(a0)*RAD, h0, Math.sin(a0)*RAD];
-    const q1 = [Math.cos(a1)*RAD, h1, Math.sin(a1)*RAD];
-    const col = [0.30 + 0.04*Math.sin(a0*3.0), 0.315 + 0.04*Math.sin(a0*3.0), 0.36 + 0.04*Math.sin(a0*3.0)];
-    mbQuad(v, p0,p1,q1,q0, [0,0,0], col, [0.95, 0.0, 1.0], pid);
+  for(let i = 0; i < RING; i++){
+    const a0 = i / RING * Math.PI * 2, a1 = (i + 1) / RING * Math.PI * 2;
+    const h0 = 30 + 52 * Math.sin(a0 * 3.1 + 1.2) + 26 * Math.sin(a0 * 7.3 + 0.4) + 14 * Math.sin(a0 * 13.7 + 2.9);
+    const h1 = 30 + 52 * Math.sin(a1 * 3.1 + 1.2) + 26 * Math.sin(a1 * 7.3 + 0.4) + 14 * Math.sin(a1 * 13.7 + 2.9);
+    const p0 = [Math.cos(a0) * RAD, -20, Math.sin(a0) * RAD];
+    const p1 = [Math.cos(a1) * RAD, -20, Math.sin(a1) * RAD];
+    const q0 = [Math.cos(a0) * RAD, h0, Math.sin(a0) * RAD];
+    const q1 = [Math.cos(a1) * RAD, h1, Math.sin(a1) * RAD];
+    const col = [0.30 + 0.04 * Math.sin(a0 * 3.0), 0.315 + 0.04 * Math.sin(a0 * 3.0), 0.36 + 0.04 * Math.sin(a0 * 3.0)];
+    mbQuad(v, p0, p1, q1, q0, [0, 0, 0], col, [0.95, 0.0, 1.0], pid);
   }
   pid++;
 
   // 岩石
-  for(let i=0;i<80;i++){
-    const a = rr(0, Math.PI*2), d = rr(30, 340);
-    const cx = Math.cos(a)*d, cz = Math.sin(a)*d;
+  for(let i = 0; i < 80; i++){
+    const a = rr(0, Math.PI * 2), d = rr(30, 340);
+    const cx = Math.cos(a) * d, cz = Math.sin(a) * d;
     const s = rr(0.35, 1.7);
-    const rot = rr(0, Math.PI*2);
+    const rot = rr(0, Math.PI * 2);
     const tone = rr(0.16, 0.30);
-    addRock(v, cx, s*0.35, cz, s, rot, [tone*1.05, tone*0.98, tone*0.88], pid);
+    addRock(v, cx, s * 0.35, cz, s, rot, [tone * 1.05, tone * 0.98, tone * 0.88], pid);
   }
   pid++;
 
-  // 靶场：钢板靶由 45_targets.js 作为独立可毁实例绘制
-  pid++;
-
   // 距离标尺
-  for(let i=1;i<=4;i++){
-    const z = i*100;
-    for(const s of [-1,1]){
-      addBox(v, s*46, 0.9, z, 0.12, 1.8, 0.12, [0.36,0.34,0.28], [0.8, 0.0, 1.0], pid);
-      addBox(v, s*46, 1.65, z, 0.60, 0.34, 0.06, [0.62,0.58,0.42], [0.8, 0.0, 1.0], pid);
+  for(let i = 1; i <= 4; i++){
+    const z = i * 100;
+    for(const s of [-1, 1]){
+      addBox(v, s * 46, 0.9, z, 0.12, 1.8, 0.12, [0.36, 0.34, 0.28], [0.8, 0.0, 1.0], pid);
+      addBox(v, s * 46, 1.65, z, 0.60, 0.34, 0.06, [0.62, 0.58, 0.42], [0.8, 0.0, 1.0], pid);
     }
   }
   pid++;
 
   // 混凝土掩体
-  for(let i=0;i<7;i++){
-    const a = rr(0, Math.PI*2), d = rr(20, 90);
-    const bx = Math.cos(a)*d, bz = Math.sin(a)*d;
-    addBox(v, bx, 0.55, bz, rr(1.6,3.2), rr(0.7,1.1), rr(0.8,1.6),
-           [0.24,0.23,0.21], [0.85, 0.0, 1.0], pid, rr(-0.4,0.4));
+  for(let i = 0; i < 7; i++){
+    const a = rr(0, Math.PI * 2), d = rr(20, 90);
+    const bx = Math.cos(a) * d, bz = Math.sin(a) * d;
+    addBox(v, bx, 0.55, bz, rr(1.6, 3.2), rr(0.7, 1.1), rr(0.8, 1.6),
+           [0.24, 0.23, 0.21], [0.85, 0.0, 1.0], pid, rr(-0.4, 0.4));
   }
   pid++;
 
   // 油桶
-  for(let i=0;i<10;i++){
-    const a = rr(0, Math.PI*2), d = rr(14, 80);
-    const bx = Math.cos(a)*d, bz = Math.sin(a)*d;
+  for(let i = 0; i < 10; i++){
+    const a = rr(0, Math.PI * 2), d = rr(14, 80);
+    const bx = Math.cos(a) * d, bz = Math.sin(a) * d;
     addCyl(v, [bx, 0, bz], [bx, 0.88, bz], 0.29, 0.29, 8,
-           [0.22,0.12,0.08], [0.70, 0.15, 1.0], pid);
+           [0.22, 0.12, 0.08], [0.70, 0.15, 1.0], pid);
   }
   pid++;
 
   return uploadMesh(v);
 }
 
+/* 确定性伪随机（按坐标），避免每次加载世界都变样 */
+function hash2(x, z, k){
+  const v = Math.sin(x * 12.9898 + z * 78.233 + k * 37.719) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+/* 道路：沿中线铺一条贴地的深色条带（贴图里的路太细，远看会被 mipmap 抹掉） */
+function addRoadStrip(v, pts, w, id){
+  if(!pts || pts.length < 2) return;
+  const hw = w * 0.5, n = pts.length;
+  const verts = [];
+  for(let i = 0; i < n; i++){
+    const [x, z] = pts[i];
+    let px, pz;
+    if(i === 0){ px = pts[1][0] - x; pz = pts[1][1] - z; }
+    else if(i === n - 1){ px = x - pts[n - 2][0]; pz = z - pts[n - 2][1]; }
+    else { px = pts[i + 1][0] - pts[i - 1][0]; pz = pts[i + 1][1] - pts[i - 1][1]; }
+    const L = Math.hypot(px, pz) || 1;
+    const nx = -pz / L * hw, nz = px / L * hw;
+    verts.push([x + nx, groundH(x + nx, z + nz) + 0.06, z + nz]);
+    verts.push([x - nx, groundH(x - nx, z - nz) + 0.06, z - nz]);
+  }
+  const col = [0.315, 0.295, 0.262];
+  const mat = [0.96, 0.0, 1.0];
+  for(let i = 0; i + 2 < verts.length; i += 2){
+    const c = [verts[i][0] * 0.5 + verts[i + 1][0] * 0.5, 50, verts[i][2] * 0.5 + verts[i + 1][2] * 0.5];
+    mbQuad(v, verts[i], verts[i + 1], verts[i + 3], verts[i + 2], c, col, mat, id);
+  }
+}
+
+/* 地图建筑：挤出的墙体 + 四坡屋顶（教堂塔单独处理） */
+function addMapBuilding(v, b, id){
+  const pts = b.pts;
+  if(!pts || pts.length < 3) return;
+  let cx = 0, cz = 0;
+  for(const p of pts){ cx += p[0]; cz += p[1]; }
+  cx /= pts.length; cz /= pts.length;
+  const y0 = groundH(cx, cz) - 0.5;
+  const y1 = y0 + b.h;
+  const kind = b.kind || 'res';
+  const mat = [0.88, 0.0, 1.0];
+  const wallCol = kind === 'church' ? [0.82, 0.80, 0.72]
+               : kind === 'tower'   ? [0.82, 0.80, 0.72]
+               : kind === 'ind'     ? [0.56, 0.56, 0.54]
+               : kind === 'com'     ? [0.68, 0.65, 0.60]
+               :                     [0.74, 0.71, 0.64];
+
+  if(kind === 'tower'){
+    addCyl(v, [cx, y0, cz], [cx, y1, cz], 2.5, 2.3, 8, wallCol, mat, id);
+    addCyl(v, [cx, y1, cz], [cx, y1 + 3.6, cz], 2.7, 0.12, 8, [0.16, 0.20, 0.24], mat, id);
+    addBox(v, cx, y1 + 4.4, cz, 0.14, 1.5, 0.14, [0.92, 0.90, 0.72], mat, id);
+    addBox(v, cx, y1 + 4.65, cz, 0.85, 0.14, 0.14, [0.92, 0.90, 0.72], mat, id);
+    return;
+  }
+
+  const roofCol = kind === 'church' ? [0.16, 0.20, 0.24]
+                : kind === 'ind'     ? [0.30, 0.30, 0.31]
+                : [0.24, 0.13, 0.095];
+
+  /* 墙体：显式绕序 + 外法线（mbQuad 的自动修正对凹多边形会判错，墙面必须自己算） */
+  let area = 0;
+  for(let i = 0, j = pts.length - 1; i < pts.length; j = i++)
+    area += pts[j][0] * pts[i][1] - pts[i][0] * pts[j][1];
+  const P = area < 0 ? pts.slice().reverse() : pts;
+  for(let i = 0; i < P.length; i++){
+    const j = (i + 1) % P.length;
+    const dx = P[j][0] - P[i][0], dz = P[j][1] - P[i][1];
+    const L = Math.hypot(dx, dz) || 1;
+    const n = [dz / L, 0, -dx / L];
+    const a = [P[i][0], y0, P[i][1]], b2 = [P[j][0], y0, P[j][1]];
+    const c = [P[j][0], y1, P[j][1]], d = [P[i][0], y1, P[i][1]];
+    mbTri(v, a, c, b2, n, wallCol, mat, id);
+    mbTri(v, a, d, c, n, wallCol, mat, id);
+  }
+  /* 顶盖（朝上） */
+  const C3 = [cx, y1, cz];
+  for(let i = 0; i < P.length; i++){
+    const j = (i + 1) % P.length;
+    mbTri(v, C3, [P[i][0], y1, P[i][1]], [P[j][0], y1, P[j][1]], [0, 1, 0], roofCol, mat, id);
+  }
+
+  /* 四坡屋顶：底圈放大 10%，顶在中心上方 */
+  const sc = 1.10;
+  const R = P.map(p => [cx + (p[0] - cx) * sc, cz + (p[1] - cz) * sc]);
+  const apex = [cx, y1 + Math.max(1.0, Math.min(2.4, Math.sqrt(b.a || 40) * 0.16)), cz];
+  for(let i = 0; i < R.length; i++){
+    const j = (i + 1) % R.length;
+    const p3 = [R[i][0], y1, R[i][1]], q3 = [R[j][0], y1, R[j][1]];
+    const n = norm3(cross3(sub3(p3, q3), sub3(apex, q3)));
+    mbTri(v, q3, p3, apex, n, roofCol, mat, id);
+  }
+}
+
+/* 地图树：树干 + 两层圆锥树冠 */
+function addMapTree(v, t, id){
+  const x = t.x, z = t.z, s = t.s;
+  const y0 = groundH(x, z) - 0.15;
+  const g1 = 0.10 + hash2(x, z, 1) * 0.05, g2 = 0.19 + hash2(x, z, 2) * 0.06;
+  addCyl(v, [x, y0, z], [x, y0 + 1.5 * s, z], 0.14 * s, 0.10 * s, 5,
+         [0.22, 0.15, 0.09], [0.92, 0.0, 1.0], id, false);
+  addCyl(v, [x, y0 + 1.1 * s, z], [x, y0 + 3.1 * s, z], 1.15 * s, 0.06 * s, 6,
+         [0.10 + g1 * 0.4, g2, 0.07], [0.95, 0.0, 1.0], id, false);
+  addCyl(v, [x, y0 + 2.4 * s, z], [x, y0 + 4.1 * s, z], 0.85 * s, 0.04 * s, 6,
+         [0.08 + g1 * 0.3, g2 * 0.85, 0.06], [0.95, 0.0, 1.0], id, false);
+}
+
 function addRock(v, cx, cy, cz, s, rot, col, id){
   // 低模二十面体近似：8 面双锥
   const n = 7;
   const ring = [];
-  for(let i=0;i<n;i++){
-    const a = i/n*Math.PI*2 + rot;
+  for(let i = 0; i < n; i++){
+    const a = i / n * Math.PI * 2 + rot;
     const r = s * rr(0.8, 1.25);
-    ring.push([cx + Math.cos(a)*r, cy + rr(-0.15,0.15)*s, cz + Math.sin(a)*r]);
+    ring.push([cx + Math.cos(a) * r, cy + rr(-0.15, 0.15) * s, cz + Math.sin(a) * r]);
   }
-  const top = [cx + rr(-0.2,0.2)*s, cy + s*rr(0.55,0.9), cz + rr(-0.2,0.2)*s];
-  const bot = [cx, cy - s*0.32, cz];
-  for(let i=0;i<n;i++){
-    const a = ring[i], b = ring[(i+1)%n];
-    mbTri(v, a, b, top, norm3(cross3(sub3(b,a), sub3(top,a))), col, [0.92,0.0,1.0], id);
-    mbTri(v, b, a, bot, norm3(cross3(sub3(a,b), sub3(bot,b))), col, [0.92,0.0,1.0], id);
+  const top = [cx + rr(-0.2, 0.2) * s, cy + s * rr(0.55, 0.9), cz + rr(-0.2, 0.2) * s];
+  const bot = [cx, cy - s * 0.32, cz];
+  for(let i = 0; i < n; i++){
+    const a = ring[i], b = ring[(i + 1) % n];
+    mbTri(v, a, b, top, norm3(cross3(sub3(b, a), sub3(top, a))), col, [0.92, 0.0, 1.0], id);
+    mbTri(v, b, a, bot, norm3(cross3(sub3(a, b), sub3(bot, b))), col, [0.92, 0.0, 1.0], id);
   }
 }
+
+/* ===================== 41_map.js ===================== */
+/* ============================ 地图：库尔斯克郊外 ============================ */
+/*  数据由 tools/mapgen.js 生成（src/map/kursk.js → window.MAP），在 index.html 里
+    于 app.js 之前以 <script> 注入，所以本模块加载时数据已经就位。
+      · height  —— uint16(cm) 高度网格，相对 hmin
+      · tex     —— 地面贴图（R 植被变化 / G 道路 / B 林地 / A 高度）
+      · buildings / roads / trees / church / spawn / range / attrib
+    本模块负责：解码、贴地高度、地形网格（含外圈裙边）、建筑/树网格、碰撞。   */
+
+const MAP = {
+  ok: false, halfM: 1100, grid: 0, N: 0, hmin: 0, hmax: 0,
+  h: null, tex: null, texReady: false, texName: '',
+  buildings: [], roads: [], trees: [], spawn: null, church: null, range: null,
+  attrib: '', name: '',
+  mesh: null,            // {vbo, ibo, count}
+  boxList: [],           // 建筑碰撞盒 {x0,z0,x1,z1,h}
+  houses: null,          // CC0 房屋模型（解码 + VBO/IBO + 实例缓冲）
+};
+
+function b64ToU8(b64){
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+
+function mapDecode(){
+  const d = window.MAP;
+  if(!d || !d.height) return false;
+  MAP.name = d.name || 'map';
+  MAP.halfM = d.halfM; MAP.grid = d.grid; MAP.N = d.grid + 1;
+  MAP.hmin = d.hmin; MAP.hmax = d.hmax;
+  const bin = atob(d.height);
+  const n = MAP.N * MAP.N;
+  const u16 = new Uint16Array(n);
+  for(let i = 0; i < n; i++) u16[i] = bin.charCodeAt(i * 2) | (bin.charCodeAt(i * 2 + 1) << 8);
+  MAP.h = new Float32Array(n);
+  for(let i = 0; i < n; i++) MAP.h[i] = u16[i] / 100;      // 米，相对 hmin
+  MAP.buildings = d.buildings || [];
+  MAP.roads = d.roads || [];
+  MAP.trees = d.trees || [];
+  MAP.spawn = d.spawn || null;
+  MAP.church = d.church || null;
+  MAP.range = d.range || null;
+  MAP.attrib = d.attrib || '';
+  MAP.texName = d.tex || '';
+  MAP.ok = true;
+  mapBuildHouses();
+  mapBuildBoxes();
+  return true;
+}
+
+/* 建筑碰撞盒（本地坐标 AABB） */
+function mapBuildBoxes(){
+  MAP.boxList = [];
+  const push = (x0, z0, x1, z1, h) => {
+    const y0 = groundH((x0 + x1) / 2, (z0 + z1) / 2) - 0.5;
+    MAP.boxList.push({ x0, z0, x1, z1, y0, y1: y0 + h, h, kind: 'res' });
+  };
+  for(const b of MAP.buildings){
+    if(b.box){ push(b.box[0], b.box[1], b.box[2], b.box[3], (MAP.houses && MAP.houses[b.m]) ? MAP.houses[b.m].h * b.s : 6); continue; }
+    if(!b.pts || b.pts.length < 3) continue;
+    let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+    for(const p of b.pts){
+      if(p[0] < x0) x0 = p[0]; if(p[0] > x1) x1 = p[0];
+      if(p[1] < z0) z0 = p[1]; if(p[1] > z1) z1 = p[1];
+    }
+    push(x0, z0, x1, z1, b.h || 3);
+  }
+}
+
+/* ---------------- CC0 房屋模型（实例化） ---------------- */
+function mapBuildHouses(){
+  const list = window.HOUSES;
+  if(!Array.isArray(list) || !list.length) return null;
+  const models = list.map(m => {
+    const u8 = b64ToU8(m.vdat);
+    const dv = new DataView(u8.buffer);
+    const n = m.nv;
+    const f = new Float32Array(n * 13);
+    for(let i = 0; i < n; i++){
+      const b = i * 13, o = i * 13;
+      f[o]     = dv.getInt16(b, true) / 1000;
+      f[o + 1] = dv.getInt16(b + 2, true) / 1000;
+      f[o + 2] = dv.getInt16(b + 4, true) / 1000;
+      f[o + 3] = dv.getInt8(b + 6) / 127;
+      f[o + 4] = dv.getInt8(b + 7) / 127;
+      f[o + 5] = dv.getInt8(b + 8) / 127;
+      f[o + 6] = u8[b + 9] / 255;
+      f[o + 7] = u8[b + 10] / 255;
+      f[o + 8] = u8[b + 11] / 255;
+      f[o + 9] = u8[b + 12] / 255;      // rough
+      f[o + 10] = 0;                     // metal
+      f[o + 11] = 1;                     // ao
+      f[o + 12] = 0;                     // part
+    }
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, f, gl.STATIC_DRAW);
+    const iu8 = b64ToU8(m.idat);
+    const idv = new DataView(iu8.buffer);
+    const idx = new Uint16Array(m.ni);
+    for(let i = 0; i < m.ni; i++) idx[i] = idv.getUint16(i * 2, true);
+    const ibo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    return { vbo, ibo, ni: m.ni, w: m.w, d: m.d, h: m.h, name: m.name, inst: [], instVBO: null };
+  });
+
+  /* 实例：MAP.buildings 里带 m 的条目 */
+  for(const b of MAP.buildings){
+    if(b.m === undefined || b.m === null) continue;
+    const md = models[b.m];
+    if(!md) continue;
+    md.inst.push(b.x, groundH(b.x, b.z) - 0.25, b.z, b.rot || 0, b.s || 1, b.s || 1);
+  }
+  for(const md of models){
+    if(!md.inst.length) continue;
+    md.instVBO = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, md.instVBO);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(md.inst), gl.STATIC_DRAW);
+    md.nInst = md.inst.length / 6;
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, null);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+  MAP.houses = models;
+  const total = models.reduce((a, m) => a + (m.nInst || 0), 0);
+  console.log('  CC0 房屋模型 ' + models.length + ' 个，实例 ' + total + ' 个');
+  return models;
+}
+
+/* ---------------- 贴地高度 ---------------- */
+function groundH(x, z){
+  if(!MAP.ok) return 0;
+  const N = MAP.N, half = MAP.halfM;
+  const fx = (x + half) / (2 * half) * (N - 1);
+  const fz = (z + half) / (2 * half) * (N - 1);
+  const i0 = Math.max(0, Math.min(N - 2, Math.floor(fx)));
+  const j0 = Math.max(0, Math.min(N - 2, Math.floor(fz)));
+  const u = Math.max(0, Math.min(1, fx - i0)), v = Math.max(0, Math.min(1, fz - j0));
+  const h = MAP.h;
+  return h[j0 * N + i0] * (1 - u) * (1 - v) + h[j0 * N + i0 + 1] * u * (1 - v)
+       + h[(j0 + 1) * N + i0] * (1 - u) * v + h[(j0 + 1) * N + i0 + 1] * u * v;
+}
+
+/* 地面坡度（前后 / 左右），用于车体姿态 */
+function groundSlope(x, z){
+  const e = 3.0;
+  const dx = (groundH(x + e, z) - groundH(x - e, z)) / (2 * e);
+  const dz = (groundH(x, z + e) - groundH(x, z - e)) / (2 * e);
+  return [dx, dz];
+}
+
+/* ---------------- 地形网格 ---------------- */
+/*  中心 grid×grid 高分辨率网格 + 四条裙边（延伸到 ±2400 m，高度沿用边缘） */
+function buildMapTerrain(){
+  if(!MAP.ok) return null;
+  const N = MAP.N, half = MAP.halfM, OUT = 2400;
+  const pos = [], nrm = [], idx = [];
+  const cell = 2 * half / (N - 1);
+
+  for(let j = 0; j < N; j++){
+    for(let i = 0; i < N; i++){
+      const x = -half + i * cell, z = -half + j * cell;
+      const h = MAP.h[j * N + i];
+      pos.push(x, h, z);
+      // 法线：中心差分
+      const il = Math.max(0, i - 1), ir = Math.min(N - 1, i + 1);
+      const jd = Math.max(0, j - 1), ju = Math.min(N - 1, j + 1);
+      const dx = (MAP.h[j * N + ir] - MAP.h[j * N + il]) / ((ir - il) * cell);
+      const dz = (MAP.h[ju * N + i] - MAP.h[jd * N + i]) / ((ju - jd) * cell);
+      const inv = 1 / Math.hypot(dx, 1, dz);
+      nrm.push(-dx * inv, inv, -dz * inv);
+    }
+  }
+  for(let j = 0; j < N - 1; j++){
+    for(let i = 0; i < N - 1; i++){
+      const a = j * N + i, b = a + 1, c = a + N, d = c + 1;
+      idx.push(a, c, b, b, c, d);
+    }
+  }
+
+  /* 裙边：四条带，外缘高度沿用内缘（边缘外的平原） */
+  const SEG = 64;
+  const edge = (pts, outDir) => {
+    // pts: 内缘采样点 [[x,z]...]（从一角到另一角），outDir: [dx,dz] 外法线
+    const base = pos.length / 3;
+    for(let k = 0; k <= SEG; k++){
+      const [x, z] = pts[k];
+      const h = groundH(x, z);
+      pos.push(x, h, z);
+      const ox = x + outDir[0] * (OUT - half), oz = z + outDir[1] * (OUT - half);
+      pos.push(ox, h, oz);
+      const s = groundSlope(x, z);
+      const inv = 1 / Math.hypot(s[0], 1, s[1]);
+      const nx = -s[0] * inv, ny = inv, nz = -s[1] * inv;
+      nrm.push(nx, ny, nz, nx, ny, nz);
+    }
+    for(let k = 0; k < SEG; k++){
+      const a = base + k * 2, b = a + 1, c = a + 2, d = a + 3;
+      if(outDir[0] + outDir[1] > 0) idx.push(a, b, c, b, d, c);
+      else idx.push(a, c, b, b, c, d);
+    }
+  };
+  const north = [], south = [], west = [], east = [];
+  for(let k = 0; k <= SEG; k++){
+    const t = k / SEG;
+    north.push([-half + t * 2 * half, -half]);
+    south.push([-half + t * 2 * half,  half]);
+    west.push([-half, -half + t * 2 * half]);
+    east.push([ half, -half + t * 2 * half]);
+  }
+  edge(north, [0, -1]);
+  edge(south, [0, 1]);
+  edge(west, [-1, 0]);
+  edge(east, [1, 0]);
+
+  const vbo = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+  const inter = new Float32Array(pos.length / 3 * 6);
+  for(let i = 0, n = pos.length / 3; i < n; i++){
+    inter[i * 6] = pos[i * 3]; inter[i * 6 + 1] = pos[i * 3 + 1]; inter[i * 6 + 2] = pos[i * 3 + 2];
+    inter[i * 6 + 3] = nrm[i * 3]; inter[i * 6 + 4] = nrm[i * 3 + 1]; inter[i * 6 + 5] = nrm[i * 3 + 2];
+  }
+  gl.bufferData(gl.ARRAY_BUFFER, inter, gl.STATIC_DRAW);
+  const ibo = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(idx), gl.STATIC_DRAW);
+  MAP.mesh = { vbo, ibo, count: idx.length };
+  return MAP.mesh;
+}
+
+/* ---------------- 地面贴图 ---------------- */
+function mapLoadTexture(){
+  if(!MAP.ok || !MAP.texName) return;
+  /* 先放一张 1×1 占位，避免贴图到达前地面全黑 */
+  const t0 = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t0);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+                new Uint8Array([30, 42, 22, 255]));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  MAP.tex = t0; MAP.texReady = false;
+
+  const img = new Image();
+  img.onload = () => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    MAP.tex = t; MAP.texReady = true;
+  };
+  img.onerror = () => { MAP.texReady = false; };
+  img.src = MAP.texName;
+}
+
+/* ---------------- 碰撞 ---------------- */
+/* 车 vs 建筑：把车（近似圆）推出 AABB */
+function mapCollide(px, pz, r){
+  if(!MAP.ok) return null;
+  let hit = null;
+  for(const b of MAP.boxList){
+    const cx = Math.max(b.x0, Math.min(b.x1, px));
+    const cz = Math.max(b.z0, Math.min(b.z1, pz));
+    const dx = px - cx, dz = pz - cz;
+    const d2 = dx * dx + dz * dz;
+    if(d2 > r * r) continue;
+    if(d2 > 1e-8){
+      const d = Math.sqrt(d2);
+      const push = (r - d) / d;
+      hit = { dx: dx * push, dz: dz * push };
+    }else{
+      /* 车已经进到盒子内部：往最近的面外推 */
+      const l = px - b.x0, rr = b.x1 - px, t = pz - b.z0, bb = b.z1 - pz;
+      const m = Math.min(l, rr, t, bb);
+      hit = { dx: 0, dz: 0 };
+      if(m === l) hit.dx = -(l + r);
+      else if(m === rr) hit.dx = rr + r;
+      else if(m === t) hit.dz = -(t + r);
+      else hit.dz = bb + r;
+    }
+    px += hit.dx; pz += hit.dz;
+  }
+  return hit;
+}
+
+/* 炮弹 vs 建筑：线段与 AABB 求交，返回最近 t（0..1）或 -1 */
+function mapSegBox(a, b){
+  if(!MAP.ok) return -1;
+  let best = -1;
+  for(const bx of MAP.boxList){
+    let t0 = 0, t1 = 1, ok = true;
+    const lo = [bx.x0, bx.y0, bx.z0], hi = [bx.x1, bx.y1, bx.z1];
+    for(let k = 0; k < 3; k++){
+      const o = a[k], d = b[k] - a[k];
+      if(Math.abs(d) < 1e-8){ if(o < lo[k] || o > hi[k]){ ok = false; break; } continue; }
+      let ta = (lo[k] - o) / d, tb = (hi[k] - o) / d;
+      if(ta > tb){ const tmp = ta; ta = tb; tb = tmp; }
+      if(ta > t0) t0 = ta; if(tb < t1) t1 = tb;
+      if(t0 > t1){ ok = false; break; }
+    }
+    if(ok && t0 < 1 && t1 > 0 && (best < 0 || t0 < best)) best = Math.max(0, t0);
+  }
+  return best;
+}
+
+mapDecode();
 
 /* ===================== 45_targets.js ===================== */
 /* ============================ 可击毁靶标 ============================ */
@@ -2682,9 +3278,15 @@ function buildTargetGeo(){
 const targetBuf = buildTargetGeo();
 const TARGETS = [];
 
-for(const [x, z] of TLIST){
+/* 靶场布局：有地图时用 mapgen 找到的平整区域，否则用原点位 */
+const RANGE0 = (MAP.ok && MAP.range) ? MAP.range : { x: 0, z: 0, yaw: 0 };
+const RRC = Math.cos(RANGE0.yaw), RRS = Math.sin(RANGE0.yaw);
+for(const [ox, oz] of TLIST){
+  const x = RANGE0.x + ox * RRC + oz * RRS;
+  const z = RANGE0.z - ox * RRS + oz * RRC;
   TARGETS.push({
-    x, z, hp: TGT.hp, max: TGT.hp,
+    x, z, y: MAP.ok ? groundH(x, z) : 0,
+    hp: TGT.hp, max: TGT.hp,
     tilt: 0,                    // 绕 X 轴向后倒的角度
     state: 'up',                // up | falling | down | rising
     downT: 0,
@@ -2697,8 +3299,8 @@ for(const [x, z] of TLIST){
 function targetHit(tg, a, b){
   const c = Math.cos(tg.tilt), s = Math.sin(tg.tilt);
   // 世界 → 靶标局部：先平移，再反向绕 X 旋转
-  const lx0 = a[0]-tg.x, ly0 = a[1], lz0 = a[2]-tg.z;
-  const lx1 = b[0]-tg.x, ly1 = b[1], lz1 = b[2]-tg.z;
+  const lx0 = a[0]-tg.x, ly0 = a[1]-tg.y, lz0 = a[2]-tg.z;
+  const lx1 = b[0]-tg.x, ly1 = b[1]-tg.y, lz1 = b[2]-tg.z;
   const p0 = [lx0, c*ly0 + s*lz0, -s*ly0 + c*lz0];
   const p1 = [lx1, c*ly1 + s*lz1, -s*ly1 + c*lz1];
 
@@ -2721,7 +3323,7 @@ function targetHit(tg, a, b){
 }
 
 function targetMatrix(tg){
-  return M4.mul(M4.translate(tg.x, 0, tg.z), M4.rotX(tg.tilt));
+  return M4.mul(M4.translate(tg.x, tg.y || 0, tg.z), M4.rotX(tg.tilt));
 }
 
 function updateTargets(dt, t){
@@ -3548,10 +4150,28 @@ function stepShell(s, dt, t){
       }
     }
 
-    // 地面
-    if(p[1] <= 0){
-      const f = ay / Math.max(1e-6, ay - p[1]);
-      const gp = [ax + (p[0]-ax)*f, 0, az + (p[2]-az)*f];
+    // 建筑（地图模式）：炮弹打到墙就崩火花
+    if(MAP.ok){
+      const bt = mapSegBox([ax, ay, az], p);
+      if(bt >= 0){
+        const ip = [ax + (p[0]-ax)*bt, ay + (p[1]-ay)*bt, az + (p[2]-az)*bt];
+        spawnSparks(ip, s.mg ? 2 : 6, s.mg ? 0.6 : 1.0);
+        if(!s.mg){
+          hitFlash = 1.0;
+          spawnDust(ip[0], ip[1] + 0.2, ip[2], rr(-1,1), rr(1,2.5), rr(-1,1), rr(0.5,1.0));
+        }
+        s.alive = false;
+        return;
+      }
+    }
+
+    // 地面（地图模式对高度场求交）
+    const ga = MAP.ok ? groundH(ax, az) : 0;
+    const gb = MAP.ok ? groundH(p[0], p[2]) : 0;
+    if(MAP.ok ? (ay >= ga && p[1] <= gb) : (p[1] <= 0)){
+      const da = ay - ga, db = gb - p[1];
+      const f = da / Math.max(1e-6, da + db);
+      const gp = [ax + (p[0]-ax)*f, MAP.ok ? ga + (gb - ga) * f : 0, az + (p[2]-az)*f];
       if(s.mg) mgGroundImpact(gp); else groundImpact(gp);
       s.alive = false;
       return;
@@ -4604,9 +5224,12 @@ function drawWrecks(pr){
 /* ===================== 60_gpu.js ===================== */
 /* ============================ 程序与目标 ============================ */
 const pObj     = program(VS_OBJ, FS_OBJ);
+const pObjInst = program(VS_OBJ_INST, FS_OBJ);
+const pDepthInst = program(VS_DEPTH_INST, FS_DEPTH);
 const pSky     = program(VS_FULL, FS_SKY);
 const pDepth   = program(VS_DEPTH, FS_DEPTH);
 const pTerrain = program(VS_TERRAIN, FS_TERRAIN);
+const pMapTerrain = program(VS_MAPTERRAIN, FS_MAPTERRAIN);
 const pTrack   = program(VS_TRACK, FS_TRACK);
 const pSSAO    = program(VS_FULL, FS_SSAO);
 const pBlurAO  = program(VS_FULL, FS_BLURAO);
@@ -4913,6 +5536,13 @@ gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
   -2400,0,-2400,  2400,0, 2400, -2400,0, 2400,
 ]), gl.STATIC_DRAW);
 
+/* 地图模式：真实高度网格 + 地面贴图（无 MAP 数据时退回上面的平面） */
+let mapMesh = null;
+if(MAP.ok){
+  mapMesh = buildMapTerrain();
+  mapLoadTexture();
+}
+
 /* ---- 车辆状态 ---- */
 const car = {
   pos: [0, 0, 6],
@@ -4928,6 +5558,12 @@ const car = {
 };
 if(Q.has('turret')) car.turretT = car.turret = +Q.get('turret') * Math.PI/180;
 if(Q.has('gun'))    car.gunT = car.gun = Math.max(-0.10, Math.min(1.1, +Q.get('gun') * Math.PI/180));
+/* 地图出生点（先放，?x/?z/?yaw 优先级更高） */
+if(MAP.ok && MAP.spawn){
+  car.pos[0] = MAP.spawn.x;
+  car.pos[2] = MAP.spawn.z;
+  car.yaw = MAP.spawn.yaw || 0;
+}
 if(Q.has('x')) car.pos[0] = +Q.get('x');
 if(Q.has('z')) car.pos[2] = +Q.get('z');
 if(Q.has('yaw')) car.yaw = +Q.get('yaw') * Math.PI/180;
@@ -5357,7 +5993,7 @@ gl.bufferData(gl.ARRAY_BUFFER, markData.byteLength, gl.DYNAMIC_DRAW);
 
 /* ===================== 70_sim.js ===================== */
 /* ============================ 更新 ============================ */
-const SUN = norm3([0.58, 0.375, -0.72]);
+const SUN = norm3([0.58, 0.375, 0.72]);
 const SHOW = {albedo:1, rough:2, metal:3, ao:4, parts:5, normals:6, normal:6}[Q.get('show')] || 0;
 const DEBUG_PASS = +(Q.get('pass') || 0);
 const NOSHADOW = Q.has('noshadow');
@@ -5546,11 +6182,24 @@ function updateSim(t, dt){
   car.travelL += car.vL * dt;
   car.travelR += car.vR * dt;
 
-  // 视觉俯仰 / 侧倾
+  // 视觉俯仰 / 侧倾（加速度 + 地形坡度）
   const acc = (v - car.prevV) / Math.max(dt, 1e-4);
   car.prevV = v;
-  const pitchT = clamp(-acc * 0.0075, -0.055, 0.055);
-  const rollT  = clamp( v * yawRate * 0.0075, -0.05, 0.05);
+  let pitchT = clamp(-acc * 0.0075, -0.055, 0.055);
+  let rollT  = clamp( v * yawRate * 0.0075, -0.05, 0.05);
+  if(MAP.ok){
+    car.pos[1] = groundH(car.pos[0], car.pos[2]);
+    const [sx, sz] = groundSlope(car.pos[0], car.pos[2]);
+    const fx = Math.sin(car.yaw), fz = Math.cos(car.yaw);
+    const rx = Math.cos(car.yaw), rz = -Math.sin(car.yaw);
+    pitchT += clamp(-(sx * fx + sz * fz), -0.22, 0.22);
+    rollT  += clamp( (sx * rx + sz * rz), -0.22, 0.22);
+    /* 建筑碰撞：把车推出去 */
+    const hit = mapCollide(car.pos[0], car.pos[2], 1.9);
+    if(hit){ car.pos[0] += hit.dx; car.pos[2] += hit.dz; }
+  } else {
+    car.pos[1] = 0;
+  }
   car.pitchV += ((pitchT - car.pitch) * 110 - car.pitchV * 16) * dt;
   car.pitch  += car.pitchV * dt;
   car.rollV  += ((rollT - car.roll) * 110 - car.rollV * 16) * dt;
@@ -5678,7 +6327,7 @@ function updateSim(t, dt){
     cam.pitch = -0.11;               // 稍微俯视
     const cp2 = Math.cos(cam.pitch);
     cam.pos[0] += (car.pos[0] - Math.sin(a) * dist * cp2 - cam.pos[0]) * Math.min(1, dt * 4);
-    cam.pos[1] += (3.10 - cam.pos[1]) * Math.min(1, dt * 4);
+    cam.pos[1] += ((MAP.ok ? car.pos[1] + 3.10 : 3.10) - cam.pos[1]) * Math.min(1, dt * 4);
     cam.pos[2] += (car.pos[2] - Math.cos(a) * dist * cp2 - cam.pos[2]) * Math.min(1, dt * 4);
     cam.fov = 44;
   } else if(input.sniper){
@@ -5710,11 +6359,12 @@ function updateSim(t, dt){
     const cp = Math.cos(cam.pitch);
     const dx = car.pos[0] - Math.sin(cam.yaw) * zoom * cp;
     const dz2 = car.pos[2] - Math.cos(cam.yaw) * zoom * cp;
-    const dyv = 3.90 - Math.sin(cam.pitch) * zoom * 0.5;
+    const baseY = MAP.ok ? car.pos[1] : 0;
+    const dyv = baseY + 3.90 - Math.sin(cam.pitch) * zoom * 0.5;
     cam.pos[0] += (dx - cam.pos[0]) * Math.min(1, dt * 6.5);
     cam.pos[1] += (dyv - cam.pos[1]) * Math.min(1, dt * 6.5);
     cam.pos[2] += (dz2 - cam.pos[2]) * Math.min(1, dt * 6.5);
-    cam.pos[1] = Math.max(cam.pos[1], 1.0);
+    cam.pos[1] = Math.max(cam.pos[1], baseY + 1.0);
     cam.fov = 58;
   }
 
@@ -5982,6 +6632,27 @@ function drawMinimap(){
   const sx = x => C + (x - px) * k;
   const sz = z => C - (z - pz) * k;
 
+  /* 地图要素：道路 + 建筑 */
+  if(MAP.ok){
+    g.strokeStyle = 'rgba(225,225,210,.26)';
+    g.lineWidth = Math.max(1, 2.0 * k);
+    g.beginPath();
+    for(const r of MAP.roads){
+      if(!r.pts || r.pts.length < 2) continue;
+      g.moveTo(sx(r.pts[0][0]), sz(r.pts[0][1]));
+      for(let i = 1; i < r.pts.length; i++) g.lineTo(sx(r.pts[i][0]), sz(r.pts[i][1]));
+    }
+    g.stroke();
+    g.fillStyle = 'rgba(235,235,225,.30)';
+    for(const b of MAP.buildings){
+      if(!b.pts || b.pts.length < 3) continue;
+      g.beginPath();
+      g.moveTo(sx(b.pts[0][0]), sz(b.pts[0][1]));
+      for(let i = 1; i < b.pts.length; i++) g.lineTo(sx(b.pts[i][0]), sz(b.pts[i][1]));
+      g.closePath(); g.fill();
+    }
+  }
+
   for(const tg of TARGETS){
     const x = sx(tg.x), y = sz(tg.z);
     if(x < -8 || x > S + 8 || y < -8 || y > S + 8) continue;
@@ -6243,6 +6914,70 @@ function sunScreen(){
   return [x*0.5+0.5, y*0.5+0.5, vis * clamp(df * 2.4, 0.0, 1.0)];
 }
 
+/* ---- CC0 房屋实例（主 pass 与阴影 pass 共用） ---- */
+function drawHouses(pr, isDepth){
+  if(!MAP.houses || !MAP.houses.length) return;
+  gl.useProgram(pr.p);
+  if(isDepth){
+    gl.uniformMatrix4fv(pr.u.uLightVP, false, lightVP);
+    gl.uniformMatrix4fv(pr.u.uModel, false, M4.ident());
+  }else{
+    gl.uniformMatrix4fv(pr.u.uVP, false, VP);
+    gl.uniformMatrix4fv(pr.u.uLightVPNear, false, lightVPNear);
+    gl.uniformMatrix4fv(pr.u.uLightVPFar, false, lightVPFar);
+    gl.uniformMatrix4fv(pr.u.uModel, false, M4.ident());
+    gl.uniform3fv(pr.u.uCam, cam.pos);
+    gl.uniform1f(pr.u.uTime, simT);
+    gl.uniform1f(pr.u.uShadowOn, NOSHADOW ? 0 : 1);
+    gl.uniform1f(pr.u.uSpecAA, 0.0);
+    gl.uniform1f(pr.u.uLowAO, 0.0);
+    gl.uniform1f(pr.u.uEnvLod, ENV_LOD);
+    gl.uniform1i(pr.u.uShow, SHOW);
+    if(pr.u.uEnv) texCube(5, envTex, pr.u.uEnv);
+    setFlashLights(pr.u);
+    tex(0, shadowTexNear, pr.u.uShadowNear);
+    tex(1, shadowTexFar, pr.u.uShadowFar);
+    setShadowUniforms(pr.u);
+  }
+  let any = false;
+  for(const md of MAP.houses){
+    if(!md.nInst) continue;
+    any = true;
+    gl.bindBuffer(gl.ARRAY_BUFFER, md.vbo);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, md.ibo);
+    clearAttribs();
+    const la = gl.getAttribLocation(pr.p, 'aPos');
+    gl.enableVertexAttribArray(la);
+    gl.vertexAttribPointer(la, 3, gl.FLOAT, false, 52, 0);
+    if(!isDepth){
+      const ln = gl.getAttribLocation(pr.p, 'aNrm');
+      const lc = gl.getAttribLocation(pr.p, 'aCol');
+      const lm = gl.getAttribLocation(pr.p, 'aMat');
+      const lp = gl.getAttribLocation(pr.p, 'aPart');
+      gl.enableVertexAttribArray(ln); gl.vertexAttribPointer(ln, 3, gl.FLOAT, false, 52, 12);
+      gl.enableVertexAttribArray(lc); gl.vertexAttribPointer(lc, 3, gl.FLOAT, false, 52, 24);
+      gl.enableVertexAttribArray(lm); gl.vertexAttribPointer(lm, 3, gl.FLOAT, false, 52, 36);
+      gl.enableVertexAttribArray(lp); gl.vertexAttribPointer(lp, 1, gl.FLOAT, false, 52, 48);
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, md.instVBO);
+    const li = gl.getAttribLocation(pr.p, 'aIInst');
+    const ls = gl.getAttribLocation(pr.p, 'aIScale');
+    gl.enableVertexAttribArray(li);
+    gl.vertexAttribPointer(li, 4, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribDivisor(li, 1);
+    gl.enableVertexAttribArray(ls);
+    gl.vertexAttribPointer(ls, 2, gl.FLOAT, false, 24, 16);
+    gl.vertexAttribDivisor(ls, 1);
+    gl.drawElementsInstanced(gl.TRIANGLES, md.ni, gl.UNSIGNED_SHORT, 0, md.nInst);
+    gl.vertexAttribDivisor(li, 0);
+    gl.vertexAttribDivisor(ls, 0);
+  }
+  if(any){
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+    if(!isDepth){ gl.bindBuffer(gl.ARRAY_BUFFER, null); }
+  }
+}
+
 function draw(){
   lightVPNear = shadowVPNear();
   lightVPFar  = shadowVPFar();
@@ -6262,6 +6997,7 @@ function draw(){
     lightVP = pass[2];
     gl.uniformMatrix4fv(pDepth.u.uLightVP, false, lightVP);
     drawObject(worldBuf, M4.ident(), pDepth);
+    drawHouses(pDepthInst, true);
     drawVehicle(pDepth, pTrackDepth);
     drawRemotes(pDepth, pTrackDepth);
     // 模型有自己的深度着色器，画完要切回来
@@ -6288,35 +7024,69 @@ function draw(){
   const showMode = SHOW;
 
   /* 地形 */
-  gl.useProgram(pTerrain.p);
-  gl.uniformMatrix4fv(pTerrain.u.uVP, false, VP);
-  gl.uniformMatrix4fv(pTerrain.u.uLightVPNear, false, lightVPNear);
-  gl.uniformMatrix4fv(pTerrain.u.uLightVPFar, false, lightVPFar);
-  gl.uniform3fv(pTerrain.u.uCam, cam.pos);
-  gl.uniform1f(pTerrain.u.uTime, simT);
-  gl.uniform1f(pTerrain.u.uShadowOn, shadowOn);
-  gl.uniform1i(pTerrain.u.uShow, showMode);
-  if(pTerrain.u.uEnv){ texCube(5, envTex, pTerrain.u.uEnv); gl.uniform1f(pTerrain.u.uEnvLod, ENV_LOD); }
-  setFlashLights(pTerrain.u);
-  tex(0, shadowTexNear, pTerrain.u.uShadowNear);
-  tex(1, shadowTexFar, pTerrain.u.uShadowFar);
-  if(pTerrain.u.uSandAlb){
-    tex(2, sandAlb, pTerrain.u.uSandAlb);
-    tex(3, sandNrm, pTerrain.u.uSandNrm);
-    gl.uniform1f(pTerrain.u.uSandTile, SAND_TILE);
-    gl.uniform1f(pTerrain.u.uPomStrength, 0.02);
-    gl.uniform1f(pTerrain.u.uDetailDist, 45.0);
-    gl.uniform1f(pTerrain.u.uSandStrength, SAND_STRENGTH);
-  }
-  setShadowUniforms(pTerrain.u);
-  gl.bindBuffer(gl.ARRAY_BUFFER, terrainVBO);
-  {
+  if(mapMesh){
+    gl.useProgram(pMapTerrain.p);
+    gl.uniformMatrix4fv(pMapTerrain.u.uVP, false, VP);
+    gl.uniformMatrix4fv(pMapTerrain.u.uLightVPNear, false, lightVPNear);
+    gl.uniformMatrix4fv(pMapTerrain.u.uLightVPFar, false, lightVPFar);
+    gl.uniform3fv(pMapTerrain.u.uCam, cam.pos);
+    gl.uniform1f(pMapTerrain.u.uTime, simT);
+    gl.uniform1f(pMapTerrain.u.uShadowOn, shadowOn);
+    gl.uniform1i(pMapTerrain.u.uShow, showMode);
+    gl.uniform1f(pMapTerrain.u.uHalfM, MAP.halfM);
+    gl.uniform1f(pMapTerrain.u.uHmin, MAP.hmin);
+    gl.uniform1f(pMapTerrain.u.uHmax, MAP.hmax);
+    gl.uniform1f(pMapTerrain.u.uDetailDist, 45.0);
+    if(pMapTerrain.u.uEnv){ texCube(5, envTex, pMapTerrain.u.uEnv); gl.uniform1f(pMapTerrain.u.uEnvLod, ENV_LOD); }
+    setFlashLights(pMapTerrain.u);
+    tex(0, shadowTexNear, pMapTerrain.u.uShadowNear);
+    tex(1, shadowTexFar, pMapTerrain.u.uShadowFar);
+    if(pMapTerrain.u.uMapTex) tex(2, MAP.tex, pMapTerrain.u.uMapTex);
+    if(pMapTerrain.u.uDetail && sandNrm) tex(3, sandNrm, pMapTerrain.u.uDetail);
+    setShadowUniforms(pMapTerrain.u);
+    gl.bindBuffer(gl.ARRAY_BUFFER, mapMesh.vbo);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mapMesh.ibo);
     clearAttribs();
-    const l = gl.getAttribLocation(pTerrain.p, 'aPos');
-    gl.enableVertexAttribArray(l);
-    gl.vertexAttribPointer(l, 3, gl.FLOAT, false, 0, 0);
+    {
+      const lp = gl.getAttribLocation(pMapTerrain.p, 'aPos');
+      const ln = gl.getAttribLocation(pMapTerrain.p, 'aNrm');
+      gl.enableVertexAttribArray(lp);
+      gl.vertexAttribPointer(lp, 3, gl.FLOAT, false, 24, 0);
+      gl.enableVertexAttribArray(ln);
+      gl.vertexAttribPointer(ln, 3, gl.FLOAT, false, 24, 12);
+    }
+    gl.drawElements(gl.TRIANGLES, mapMesh.count, gl.UNSIGNED_INT, 0);
+  } else {
+    gl.useProgram(pTerrain.p);
+    gl.uniformMatrix4fv(pTerrain.u.uVP, false, VP);
+    gl.uniformMatrix4fv(pTerrain.u.uLightVPNear, false, lightVPNear);
+    gl.uniformMatrix4fv(pTerrain.u.uLightVPFar, false, lightVPFar);
+    gl.uniform3fv(pTerrain.u.uCam, cam.pos);
+    gl.uniform1f(pTerrain.u.uTime, simT);
+    gl.uniform1f(pTerrain.u.uShadowOn, shadowOn);
+    gl.uniform1i(pTerrain.u.uShow, showMode);
+    if(pTerrain.u.uEnv){ texCube(5, envTex, pTerrain.u.uEnv); gl.uniform1f(pTerrain.u.uEnvLod, ENV_LOD); }
+    setFlashLights(pTerrain.u);
+    tex(0, shadowTexNear, pTerrain.u.uShadowNear);
+    tex(1, shadowTexFar, pTerrain.u.uShadowFar);
+    if(pTerrain.u.uSandAlb){
+      tex(2, sandAlb, pTerrain.u.uSandAlb);
+      tex(3, sandNrm, pTerrain.u.uSandNrm);
+      gl.uniform1f(pTerrain.u.uSandTile, SAND_TILE);
+      gl.uniform1f(pTerrain.u.uPomStrength, 0.02);
+      gl.uniform1f(pTerrain.u.uDetailDist, 45.0);
+      gl.uniform1f(pTerrain.u.uSandStrength, SAND_STRENGTH);
+    }
+    setShadowUniforms(pTerrain.u);
+    gl.bindBuffer(gl.ARRAY_BUFFER, terrainVBO);
+    {
+      clearAttribs();
+      const l = gl.getAttribLocation(pTerrain.p, 'aPos');
+      gl.enableVertexAttribArray(l);
+      gl.vertexAttribPointer(l, 3, gl.FLOAT, false, 0, 0);
+    }
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
 
   /* 车辙 */
   if(markDirty){
@@ -6349,6 +7119,7 @@ function draw(){
   /* 世界 */
   useObjProgram();
   drawObject(worldBuf, M4.ident(), pObj);
+  drawHouses(pObjInst, false);
 
   /* 载具 */
   drawVehicle(pObj, pTrack);
@@ -8118,10 +8889,13 @@ function netRespawn(){
 /* 出生点按 slot 分开；进入场地和重生都走这里 */
 function netSpawnSelf(){
   const i = ((NET.slot || 1) - 1) & 3;
-  car.pos[0] = NET_SPAWN_X[i];
-  car.pos[1] = 0;
-  car.pos[2] = NET_SPAWN_Z;
-  car.yaw = 0;
+  const base = (MAP.ok && MAP.spawn) ? MAP.spawn : { x: 0, z: NET_SPAWN_Z, yaw: 0 };
+  /* 地图模式：以 spawn 为圆心，四个方向错开（面向地图中心/北方） */
+  const off = [[-14, 0], [0, 14], [14, 0], [0, -14]][i];
+  car.pos[0] = base.x + off[0];
+  car.pos[1] = MAP.ok ? groundH(base.x + off[0], base.z + off[1]) : 0;
+  car.pos[2] = base.z + off[1];
+  car.yaw = base.yaw || 0;
   car.turret = 0; car.gun = 0;
   car.v = 0; car.yawRate = 0; car.vL = car.vR = 0;
   car.pitch = 0; car.roll = 0; car.pitchV = 0; car.rollV = 0;
@@ -8131,7 +8905,7 @@ function netSpawnSelf(){
   cam.pitch = -0.06;
   const cp0 = Math.cos(cam.pitch);
   cam.pos[0] = car.pos[0] - Math.sin(cam.yaw) * zoom * cp0;
-  cam.pos[1] = 3.9;
+  cam.pos[1] = car.pos[1] + 3.9;
   cam.pos[2] = car.pos[2] - Math.cos(cam.yaw) * zoom * cp0;
   aimYaw = car.yaw;
   aimPitch = AIM_PITCH0;
