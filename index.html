@@ -643,8 +643,17 @@
   }catch(e){}
 })();
 </script>
-<script defer src="data/map/kursk.js?v=mwf5wfdc"></script>
-<script defer src="data/map/houses.js?v=mwf5wfdc"></script>
-<script defer src="app.js?v=mwf5wfdc"></script>
+<script>
+/* 默认是白模试验场（零下载）。带 ?map=kursk 才加载真实地图（约 1.6 MB）。
+   用 document.write 保证地图数据在 app.js 之前同步就位。 */
+(function(){
+  try{
+    if(!/(^|[?&])map=kursk(&|$)/.test(location.search)) return;
+    document.write('<script src="data/map/kursk.js?v=mwf6qrw9"><\/script>');
+    document.write('<script src="data/map/houses.js?v=mwf6qrw9"><\/script>');
+  }catch(e){}
+})();
+</script>
+<script src="app.js?v=mwf6qrw9"></script>
 </body>
 </html>

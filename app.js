@@ -665,31 +665,23 @@ void main(){
 
   // 风成沙纹（浅起伏，方向一致）
   float r0 = rip(p);
-  float e = 0.45;
-  float sl = 0.020 * f2 * (0.55 + 0.75 * meso);
-  float gx = (rip(p + vec2(e, 0.0)) - r0) / e;
-  float gz = (rip(p + vec2(0.0, e)) - r0) / e;
-  vec3 N = normalize(vec3(-gx * sl, 1.0, -gz * sl));
-  float rough = 0.93 - 0.10 * f2;
 
-  /* ---- 近景沙地贴图 + 视差（POM） ---- */
-  float detail = 1.0 - smoothstep(uDetailDist * 0.55, uDetailDist, dist);
-  if(detail > 0.001){
-    vec2 suv = p / uSandTile;
-    vec3 Vd = normalize(uCam - vPos);
-    float h0 = texture(uSandNrm, suv).a - 0.5;
-    vec2 off = Vd.xz / max(Vd.y, 0.18) * h0 * uPomStrength;
-    vec2 puv = suv + off;
-    float h1 = texture(uSandNrm, puv).a - 0.5;
-    puv = suv + Vd.xz / max(Vd.y, 0.18) * h1 * uPomStrength;
-    vec4 sn = texture(uSandNrm, puv);
-    vec3 stn = sn.rgb * 2.0 - 1.0;
-    vec3 sN = normalize(vec3(stn.x, 1.0, stn.y));
-    vec3 sAlb = texture(uSandAlb, puv).rgb;
-    vec3 sNorm = sAlb / vec3(0.385, 0.310, 0.210);   // 按通道归一，保留地面原有色相
-    base *= mix(vec3(1.0), sNorm, detail * 0.6 * uSandStrength);
-    N = normalize(mix(N, sN, detail * 0.45 * uSandStrength));
-  }
+  /* ---- 白模测试场：浅灰底 + 10 m / 50 m 方块网格 ---- */
+  base = mix(vec3(0.470, 0.472, 0.468), base, 0.12);
+  base *= 0.94 + 0.10 * (micro - 0.5);
+  vec3 N = vec3(0.0, 1.0, 0.0);
+  float rough = 0.90;
+
+  vec2 fw = max(fwidth(p), vec2(0.0008));
+  float fwm = max(fw.x, fw.y);
+  float d10 = min(abs(fract(p.x / 10.0 + 0.5) - 0.5) * 10.0,
+                  abs(fract(p.y / 10.0 + 0.5) - 0.5) * 10.0);
+  float d50 = min(abs(fract(p.x / 50.0 + 0.5) - 0.5) * 50.0,
+                  abs(fract(p.y / 50.0 + 0.5) - 0.5) * 50.0);
+  float l10 = 1.0 - smoothstep(0.0, fwm * 1.4 + 0.012, d10);
+  float l50 = 1.0 - smoothstep(0.0, fwm * 2.2 + 0.035, d50);
+  base = mix(base, vec3(0.300, 0.312, 0.322), l10 * 0.50);
+  base = mix(base, vec3(0.200, 0.212, 0.226), l50 * 0.62);
 
   if(uShow == 1){ fragColor = vec4(pow(base, vec3(1.0/2.2)), 1.0); return; }
   if(uShow == 2){ fragColor = vec4(vec3(rough), 1.0); return; }
@@ -2770,10 +2762,8 @@ function buildWorld(){
     }
     pid++;
 
-    return uploadMesh(v);
-  }
-
-  /* ---- 无地图：原来的程序化试验场 ---- */
+  } else {
+  /* ---- 无地图：白模试验场（零下载） ---- */
   // 远山
   const RING = 220, RAD = 1250;
   for(let i = 0; i < RING; i++){
@@ -2789,33 +2779,34 @@ function buildWorld(){
   }
   pid++;
 
-  // 岩石
-  for(let i = 0; i < 80; i++){
+  // 岩石（白模：浅灰）
+  for(let i = 0; i < 70; i++){
     const a = rr(0, Math.PI * 2), d = rr(30, 340);
     const cx = Math.cos(a) * d, cz = Math.sin(a) * d;
     const s = rr(0.35, 1.7);
     const rot = rr(0, Math.PI * 2);
-    const tone = rr(0.16, 0.30);
-    addRock(v, cx, s * 0.35, cz, s, rot, [tone * 1.05, tone * 0.98, tone * 0.88], pid);
+    const tone = rr(0.40, 0.58);
+    addRock(v, cx, s * 0.35, cz, s, rot, [tone * 1.02, tone, tone * 0.97], pid);
   }
   pid++;
 
-  // 距离标尺
-  for(let i = 1; i <= 4; i++){
+  // 距离标尺（每 100 m 一对白杆）
+  for(let i = 1; i <= 6; i++){
     const z = i * 100;
     for(const s of [-1, 1]){
-      addBox(v, s * 46, 0.9, z, 0.12, 1.8, 0.12, [0.36, 0.34, 0.28], [0.8, 0.0, 1.0], pid);
-      addBox(v, s * 46, 1.65, z, 0.60, 0.34, 0.06, [0.62, 0.58, 0.42], [0.8, 0.0, 1.0], pid);
+      addBox(v, s * 46, 0.9, z, 0.12, 1.8, 0.12, [0.70, 0.71, 0.70], [0.8, 0.0, 1.0], pid);
+      addBox(v, s * 46, 1.65, z, 0.60, 0.34, 0.06, [0.86, 0.86, 0.82], [0.8, 0.0, 1.0], pid);
     }
   }
   pid++;
 
-  // 混凝土掩体
+  // 混凝土掩体（白模：浅灰块）
   for(let i = 0; i < 7; i++){
     const a = rr(0, Math.PI * 2), d = rr(20, 90);
     const bx = Math.cos(a) * d, bz = Math.sin(a) * d;
+    const tone = rr(0.50, 0.66);
     addBox(v, bx, 0.55, bz, rr(1.6, 3.2), rr(0.7, 1.1), rr(0.8, 1.6),
-           [0.24, 0.23, 0.21], [0.85, 0.0, 1.0], pid, rr(-0.4, 0.4));
+           [tone, tone * 1.01, tone * 1.03], [0.85, 0.0, 1.0], pid, rr(-0.4, 0.4));
   }
   pid++;
 
@@ -2824,9 +2815,11 @@ function buildWorld(){
     const a = rr(0, Math.PI * 2), d = rr(14, 80);
     const bx = Math.cos(a) * d, bz = Math.sin(a) * d;
     addCyl(v, [bx, 0, bz], [bx, 0.88, bz], 0.29, 0.29, 8,
-           [0.22, 0.12, 0.08], [0.70, 0.15, 1.0], pid);
+           [0.30, 0.16, 0.10], [0.70, 0.15, 1.0], pid);
   }
   pid++;
+
+  }
 
   return uploadMesh(v);
 }
