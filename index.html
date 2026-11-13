@@ -624,8 +624,27 @@
     <div id="netHint">PeerJS 公共信令 · 房间码 5 位 · 最多 4 人 · 房主退出即解散</div>
   </div>
 </div>
-<script src="data/map/kursk.js"></script>
-<script src="data/map/houses.js"></script>
-<script src="app.js"></script>
+<script>
+/* 提前并行下载首辆车的载具数据（单个文件可达 20 MB，慢网下能省几十秒） */
+(function(){
+  try{
+    var qs = new URLSearchParams(location.search);
+    var id = (qs.get('veh') || '').toLowerCase();
+    if(!/^[a-z0-9_]+$/.test(id)){
+      var o = null;
+      try{ o = JSON.parse(localStorage.getItem('cdmyx.last') || 'null'); }catch(e){}
+      id = (o && (o.vehicle || o.v)) || '';
+    }
+    if(!/^[a-z0-9_]+$/.test(id)) id = 'bmpt';
+    var l = document.createElement('link');
+    l.rel = 'preload'; l.as = 'script';
+    l.href = 'data/veh/' + id + '.js';
+    document.head.appendChild(l);
+  }catch(e){}
+})();
+</script>
+<script defer src="data/map/kursk.js?v=mwf5wfdc"></script>
+<script defer src="data/map/houses.js?v=mwf5wfdc"></script>
+<script defer src="app.js?v=mwf5wfdc"></script>
 </body>
 </html>
