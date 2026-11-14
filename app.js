@@ -2099,7 +2099,12 @@ let SELECTED_ID = null;
     这就是 24 辆车也不会把内存撑爆的原因。                                   */
 
 const VDATA_KEEP = 6;              // 联机时可能同时有本地车 + 几个队友的车型
-const VEH_SRC = 'data/veh/';
+/*  贴图实验版：URL 加 ?tex=lo 时优先读 data/veh_lo/（长边 1024 + WebP 贴图，
+    几何/meta 完全一样）。那个目录缺某辆车时自动退回原版，页面不会坏。
+    不加参数时行为和原来完全一致。 */
+const VEH_SRC_LO  = 'data/veh_lo/';
+const VEH_SRC_RAW = 'data/veh/';
+let VEH_SRC = (typeof Q !== 'undefined' && Q.get('tex') === 'lo') ? VEH_SRC_LO : VEH_SRC_RAW;
 
 const VDATA       = new Map();   // id -> { meta, tex, geo }
 const VDATA_WAIT  = new Map();   // id -> Promise
@@ -2176,6 +2181,8 @@ function loadVehicleData(id){
         VDATA_SCRIPT.delete(id);
         /* 大文件 + 慢网：超时/失败自动重试一次 */
         if(attempt < 2){ start(); return; }
+        /* 贴图实验版目录里没有这辆车：退回原版再试一次 */
+        if(VEH_SRC !== VEH_SRC_RAW){ VEH_SRC = VEH_SRC_RAW; attempt = 0; start(); return; }
         settle(false);
       };
 
