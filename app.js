@@ -6614,7 +6614,8 @@ var RAPIER = (function(){
 /* ============================ 车辆物理：Rapier 现成车辆控制器 ============================ */
 /*  不再自己维护刚体 / 悬挂 / 积分器。用 @dimforge/rapier3d-compat 0.21 自带的
     DynamicRayCastVehicleController（Bullet btRaycastVehicle 的移植）：
-      · 底盘 = 一个 dynamic rigid body + cuboid collider（质量/惯量由引擎算）
+      · 底盘 = 一个 dynamic rigid body + 圆角盒 collider（车底滑板；低摩擦，
+        圆角让凸起把车顶上去而不是钩住），质量/惯量由引擎算
       · 每个负重轮一条射线，弹簧、压缩/回弹阻尼、接地点摩擦、侧向摩擦全由引擎算
       · 我们只负责：给每侧车轮发 engine force / brake、差速转向、读回姿态
     地形用和渲染完全同一份 trimesh 做静态碰撞体（测试道不会被物理网格吞掉）；
@@ -6634,6 +6635,20 @@ const PHYS_MU_LAT  = 0.38;        // 履带横向附着（侧滑；比纵向低�
 const PHYS_ENGINE  = 4.0;         // 总驱动力 / 质量（≈4 m/s²）
 const PHYS_STEER_F = 4.2;         // 每侧差速推力 / 质量
 
+/* ---- 车底滑板（skid plate）----
+   真车车底不是一块直角平板，而是首下/尾下带斜角的滑板。这里用圆角盒代替
+   直角扁盒：蹭到凸起时被圆角“推上去”，不会被直边钩住；摩擦很低，蹭地
+   也不吃速度。底面离地比可见车底高一点，避免 0.4~0.5 m 的坎一碰就顶停。 */
+const PHYS_BELLY    = 0.58;       // 车底滑板底面离地（m）
+const PHYS_BELLY_R  = 0.26;       // 车底滑板圆角半径（m）
+const PHYS_BELLY_MU = 0.10;       // 车底滑板摩擦（低摩擦，蹭到能滑过去）
+
+/* ---- 渐进限位（bump stop）----
+   悬挂压缩超过 BUMP0 比例后，刚度按平方上升，最后一段行程迅速变硬。
+   平路和小起伏保持原来的软度；落地、过坎、冲坡顶不再把车身压到底。 */
+const PHYS_BUMP0 = 0.58;          // 起效压缩量（占悬挂自由长度的比例）
+const PHYS_BUMPK = 9.0;           // 压到行程末端时的刚度倍数
+
 const PHYS = {
   ready: false, err: null,
   world: null, body: null, veh: null,
@@ -6641,6 +6656,7 @@ const PHYS = {
   mass: 19000, comH: 1.0, comZ: 0, halfW: 1.15,
   rEff: 0.3, anchorY: 0.3, Iyaw: 90000,
   trackV: 0, steerSpd: 0, steerForce: 0,  // 履带目标速度 / 差速速度 / 差速推力
+  stiff0: 0, comp0: 0, relax0: 0, maxF: 0, // 悬挂基础刚度/阻尼/最大力（渐进限位用）
   contacts: [],                    // { lx, lz, side }
   accum: 0,
   prev: { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 },
@@ -6780,13 +6796,13 @@ function physSetupVehicle(){
   PHYS.anchorY = pc(minY < 1e8 ? minY : 0.30, 0.16, 0.70);
   PHYS.rEff = pc(rN ? rSum / rN : 0.30, 0.18, 0.60);
 
-  /* 视觉/物理一致的刚性盒：底边离地 0.45 m，顶边到车体上部 */
-  const hullBot = 0.45;
+  /* 视觉/物理对应的刚性盒：底边离地 PHYS_BELLY（车底滑板），顶边到车体上部 */
+  const hullBot = PHYS_BELLY;
   const hullTop = Math.max(1.7, hh * 0.82);
   const hullCy = (hullBot + hullTop) * 0.5;
-  const hullHy = (hullTop - hullBot) * 0.5;
+  const hullHy = Math.max(0.40, (hullTop - hullBot) * 0.5);
   const colHx = Math.max(0.8, w * 0.45);
-  const colHz = Math.max(1.6, l * 0.45);
+  const colHz = Math.max(1.5, l * 0.38);        // 比原来短：减少“硬弦”卡坎
   /* 偏航转动惯量（转向助力用；比均匀长方体略大，计入履带/炮塔） */
   PHYS.Iyaw = PHYS.mass / 12 * (4 * colHx * colHx + 4 * colHz * colHz) * 1.35;
 
@@ -6802,10 +6818,19 @@ function physSetupVehicle(){
     .setCcdEnabled(true);
   const body = PHYS.world.createRigidBody(bd);
 
-  const cd = RAPIER.ColliderDesc.cuboid(colHx, Math.max(0.35, hullHy), colHz)
-    .setTranslation(0, hullCy - PHYS.comH, -PHYS.comZ)
+  /* 车底滑板：圆角盒（外尺寸 = 内盒半尺寸 + 圆角半径），低摩擦。
+     圆角让凸起把车顶上去、直边不再钩住地形；Rapier 没有圆角盒时退回方盒。 */
+  const bR = Math.min(PHYS_BELLY_R, colHx * 0.5, hullHy * 0.6, colHz * 0.5);
+  let cd = null;
+  try{
+    if(RAPIER.ColliderDesc.roundCuboid && bR > 0.04){
+      cd = RAPIER.ColliderDesc.roundCuboid(colHx - bR, hullHy - bR, colHz - bR, bR);
+    }
+  }catch(e){ cd = null; }
+  if(!cd) cd = RAPIER.ColliderDesc.cuboid(colHx, hullHy, colHz);
+  cd.setTranslation(0, hullCy - PHYS.comH, -PHYS.comZ)
     .setMass(PHYS.mass)
-    .setFriction(0.6)
+    .setFriction(PHYS_BELLY_MU)
     .setRestitution(0.0);
   PHYS.world.createCollider(cd, body);
 
@@ -6816,8 +6841,13 @@ function physSetupVehicle(){
   const stiff = 9.81 / (N * cSag);              // 静态下沉 = cSag
   const comp  = 4.9 / N;                        // 压缩阻尼（ζ≈0.35）
   const relax = 7.7 / N;                        // 回弹阻尼（ζ≈0.55）
-  const maxF  = PHYS.mass * 9.81 / N * 4.0;
+  const maxF  = PHYS.mass * 9.81 / N * 6.0;     // 上限抬高：限位/落地时能撑住
   const connY = PHYS_L0 + PHYS.rEff - cSag;     // 悬挂连接点（模型局部 y）
+
+  PHYS.stiff0 = stiff;
+  PHYS.comp0  = comp;
+  PHYS.relax0 = relax;
+  PHYS.maxF   = maxF;
 
   for(let i = 0; i < N; i++){
     const c = PHYS.contacts[i];
@@ -6999,6 +7029,25 @@ function physDrive(dt, thr, str){
   PHYS.steerForce = str * PHYS.mass * PHYS_STEER_F * (1 - 0.55 * spdK);
   PHYS.steerSpd   = str * (V.turnRate || 2.2) * PHYS.halfW * (1 - 0.35 * spdK);
 
+  /* ---- 渐进限位（bump stop）----
+     按上一物理步的压缩量调节每个轮的弹簧刚度：
+       · 压缩 < PHYS_BUMP0×自由长度：完全不动，保持原来的软
+       · 越接近行程末端，刚度按平方快速上升（阻尼按 √刚度 同步上升）
+     这样平路/小起伏还是软的，落地、过坎、冲坡顶时车身不会被压到车底滑板。 */
+  const c0 = PHYS_BUMP0 * PHYS_L0;
+  const cSpan = Math.max(1e-3, PHYS_L0 - c0);
+  for(let i = 0; PHYS.stiff0 > 0 && i < PHYS.contacts.length; i++){
+    const len = PHYS.veh.wheelSuspensionLength(i);
+    const c = (len === null || len === undefined) ? 0 : (PHYS_L0 - len);
+    let t = (c - c0) / cSpan;
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    const kf = 1 + PHYS_BUMPK * t * t;
+    const df = Math.sqrt(kf);
+    PHYS.veh.setWheelSuspensionStiffness(i, PHYS.stiff0 * kf);
+    PHYS.veh.setWheelSuspensionCompression(i, PHYS.comp0 * df);
+    PHYS.veh.setWheelSuspensionRelaxation(i, PHYS.relax0 * df);
+  }
+
   /* Rapier 车辆控制器只负责悬挂/射线；轮胎纵/横力在 physTrackForces 里算 */
   for(let i = 0; i < PHYS.contacts.length; i++){
     PHYS.veh.setWheelEngineForce(i, 0);
@@ -7036,7 +7085,8 @@ function physTrackForces(dt){
 
   for(let i = 0; i < N; i++){
     if(!veh.wheelIsInContact(i)) continue;
-    const load = veh.wheelSuspensionForce(i) || 0;
+    let load = veh.wheelSuspensionForce(i) || 0;
+    if(PHYS.maxF > 0 && load > PHYS.maxF) load = PHYS.maxF;   // 和悬挂实际出力上限一致
     if(load <= 1) continue;
 
     const cp = veh.wheelContactPoint(i, p);
