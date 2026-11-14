@@ -7,6 +7,9 @@
 /app.js
   Cache-Control: public, max-age=31536000, immutable
 
+/rapier.js
+  Cache-Control: public, max-age=31536000, immutable
+
 /data/veh/*
   Cache-Control: public, max-age=31536000, immutable
 
