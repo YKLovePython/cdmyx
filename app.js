@@ -2175,7 +2175,12 @@ const VDATA_KEEP = 6;              // 联机时可能同时有本地车 + 几个
     不加参数时行为和原来完全一致。 */
 const VEH_SRC_LO  = 'data/veh_lo/';
 const VEH_SRC_RAW = 'data/veh/';
-let VEH_SRC = (typeof Q !== 'undefined' && Q.get('tex') === 'lo') ? VEH_SRC_LO : VEH_SRC_RAW;
+/* 画质档位对照：?q=1..5 先读 data/q<N>/<id>.js，缺文件自动回退原版 */
+const VEH_Q = (typeof Q !== 'undefined' && Q.has('q'))
+  ? String(Q.get('q')).replace(/[^0-9]/g, '') : '';
+const VEH_SRC_Q = VEH_Q ? 'data/q' + VEH_Q + '/' : '';
+let VEH_SRC = VEH_SRC_Q ||
+  ((typeof Q !== 'undefined' && Q.get('tex') === 'lo') ? VEH_SRC_LO : VEH_SRC_RAW);
 
 const VDATA       = new Map();   // id -> { meta, tex, geo }
 const VDATA_WAIT  = new Map();   // id -> Promise
@@ -2250,8 +2255,8 @@ function loadVehicleData(id){
         clearTimeout(timer);
         if(s.parentNode) s.parentNode.removeChild(s);
         VDATA_SCRIPT.delete(id);
-        /* 大文件 + 慢网：超时/失败自动重试一次 */
-        if(attempt < 2){ start(); return; }
+        /* 大文件 + 慢网：超时/失败自动重试一次（画质档位目录缺车就直接回退） */
+        if(attempt < (VEH_SRC === VEH_SRC_Q ? 1 : 2)){ start(); return; }
         /* 贴图实验版目录里没有这辆车：退回原版再试一次 */
         if(VEH_SRC !== VEH_SRC_RAW){ VEH_SRC = VEH_SRC_RAW; attempt = 0; start(); return; }
         settle(false);

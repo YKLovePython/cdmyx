@@ -693,9 +693,11 @@
     if(!/^[a-z0-9_]+$/.test(id)) id = 'pz4h';
     /* ?tex=lo 用降规模贴图版（data/veh_lo/），不加参数还是原版 */
     var lo = qs.get('tex') === 'lo';
+    /* ?q=N 读画质对照目录 data/qN/，和运行时保持一致 */
+    var q = (qs.get('q') || '').replace(/[^0-9]/g, '');
     var l = document.createElement('link');
     l.rel = 'preload'; l.as = 'script';
-    l.href = (lo ? 'data/veh_lo/' : 'data/veh/') + id + '.js';
+    l.href = (q ? 'data/q' + q + '/' : (lo ? 'data/veh_lo/' : 'data/veh/')) + id + '.js';
     document.head.appendChild(l);
   }catch(e){}
 })();
@@ -706,11 +708,45 @@
 (function(){
   try{
     if(!/(^|[?&])map=kursk(&|$)/.test(location.search)) return;
-    document.write('<script src="data/map/kursk.js?v=mwg31fcv"><\/script>');
-    document.write('<script src="data/map/houses.js?v=mwg31fcv"><\/script>');
+    document.write('<script src="data/map/kursk.js?v=b3c568d2"><\/script>');
+    document.write('<script src="data/map/houses.js?v=b3c568d2"><\/script>');
   }catch(e){}
 })();
 </script>
-<script src="app.js?v=mwg31fcv"></script>
+<script>
+/* app.js 下载失败/太慢时的兜底：自动重试两次，再失败就提示点击重试。
+   国内 GitHub Pages 只有 30~40 KB/s，4.6 MB 的 app.js 首次要一分多钟。 */
+(function(){
+  window.__appRetry = 0;
+  window.__appFail = function(ev){
+    var el = ev && ev.target;
+    var src = (el && el.src) || 'app.js';
+    if(window.__appRetry < 2){
+      window.__appRetry++;
+      var s = document.createElement('script');
+      s.src = src + (src.indexOf('?') < 0 ? '?' : '&') + 'r=' + window.__appRetry;
+      s.onerror = window.__appFail;
+      document.body.appendChild(s);
+      var sub0 = document.getElementById('bootSub');
+      if(sub0) sub0.textContent = '网络中断，正在重试 ' + window.__appRetry + '/2…';
+      return;
+    }
+    var sub = document.getElementById('bootSub');
+    if(sub) sub.textContent = '加载失败：网络中断。点屏幕重试';
+    var pct = document.getElementById('bootPct');
+    if(pct) pct.textContent = '—';
+    var boot = document.getElementById('boot');
+    if(boot) boot.onclick = function(){ location.reload(); };
+  };
+  setTimeout(function(){
+    if(window.__ready) return;
+    var sub = document.getElementById('bootSub');
+    if(sub && /正在解析/.test(sub.textContent)){
+      sub.textContent = '网络较慢，仍在下载 app.js…（首次约 1.8 MB）';
+    }
+  }, 25000);
+})();
+</script>
+<script src="app.js?v=b3c568d2" onerror="window.__appFail&&window.__appFail(event)"></script>
 </body>
 </html>
