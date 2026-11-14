@@ -680,25 +680,8 @@
   </div>
 </div>
 <script>
-/* 提前并行下载首辆车的载具数据（单个文件可达 20 MB，慢网下能省几十秒） */
-(function(){
-  try{
-    var qs = new URLSearchParams(location.search);
-    var id = (qs.get('veh') || '').toLowerCase();
-    if(!/^[a-z0-9_]+$/.test(id)){
-      var o = null;
-      try{ o = JSON.parse(localStorage.getItem('cdmyx.last') || 'null'); }catch(e){}
-      id = (o && (o.vehicle || o.v)) || '';
-    }
-    if(!/^[a-z0-9_]+$/.test(id)) id = 'pz4h';
-    /* ?tex=lo 用降规模贴图版（data/veh_lo/），不加参数还是原版 */
-    var lo = qs.get('tex') === 'lo';
-    var l = document.createElement('link');
-    l.rel = 'preload'; l.as = 'script';
-    l.href = (lo ? 'data/veh_lo/' : 'data/veh/') + id + '.js?v=5ae1491f';
-    document.head.appendChild(l);
-  }catch(e){}
-})();
+/* 首辆车的数据由 app.js 里 loadVehicleData 直接发起（会切成 2–4 片并行下载），
+   这里不再 preload 单个 .js（分片后文件名不同，preload 反而会 404）。 */
 </script>
 <script>
 /* 默认是白模试验场（零下载）。带 ?map=kursk 才加载真实地图（约 1.6 MB）。
@@ -706,8 +689,8 @@
 (function(){
   try{
     if(!/(^|[?&])map=kursk(&|$)/.test(location.search)) return;
-    document.write('<script src="data/map/kursk.js?v=9e25928e"><\/script>');
-    document.write('<script src="data/map/houses.js?v=9e25928e"><\/script>');
+    document.write('<script src="data/map/kursk.js?v=eedecef3"><\/script>');
+    document.write('<script src="data/map/houses.js?v=eedecef3"><\/script>');
   }catch(e){}
 })();
 </script>
@@ -745,7 +728,7 @@
   }, 25000);
 })();
 </script>
-<script>window.__VEH_BYTES={"begleit57":2668111,"bmpt":3801226,"destroyer45":3735713,"elefant":3090128,"jagdtiger":1918251,"kpz70":3501643,"leo2a4":2539247,"leo2a7v":5200332,"leo2pl":4009728,"m18":3210768,"m1a2":2803835,"m3":3250758,"m36":2469878,"m4a3e8":3803766,"m60":3065633,"maus":2556119,"ostwind2":4959156,"pantherg":2331888,"pantsir":2300617,"panzerwerfer":2549009,"puma":2515579,"pz2f":1833766,"pz3l":2101520,"pz4h":2946973,"rad90":2945270,"sturmtiger":2883772,"t10m":3627322,"t90m":2789942,"tam2c":3475472,"tiger1":2525524,"tiger2":5861304,"tristab":2441862,"vfw":4335323,"wiesel":3630752,"ztz99a":4176897}</script>
-<script src="app.js?v=9e25928e" onerror="window.__appFail&&window.__appFail(event)"></script>
+<script>window.__VEH_PARTS={"begleit57":[260239,259356,259317,259314],"bmpt":[767279,765973,765942,765944],"destroyer45":[341535,340703,340678,340681],"elefant":[301394,300728,300691,300693],"jagdtiger":[186164,185452,185421,185423],"kpz70":[329711,328875,328844,328848],"leo2a4":[478814,477656,477611,477614],"leo2a7v":[467275,466225,466192,466194],"leo2pl":[349580,348536,348499,348502],"m18":[317447,316545,316496,316499],"m1a2":[498971,497753,497674,497677],"m3":[287767,286843,286808,286809],"m36":[235547,234703,234680,234684],"m4a3e8":[369787,368767,368706,368707],"m60":[281361,280493,280456,280459],"maus":[229789,228497,228466,228470],"ostwind2":[465651,464625,464588,464592],"pantherg":[233630,232849,232832,232821],"pantsir":[529688,529018,529018,529019],"panzerwerfer":[241990,241312,241297,241298],"puma":[494252,493262,493217,493220],"pz2f":[188729,187964,187955,187944],"pz3l":[212791,211960,211945,211933],"pz4h":[299223,298142,298131,298112],"rad90":[256939,256385,256370,256373],"sturmtiger":[261343,260701,260686,260689],"t10m":[338731,337689,337648,337649],"t90m":[563176,562000,561961,561963],"tam2c":[329989,328973,328926,328930],"tiger1":[229250,228514,228489,228491],"tiger2":[544882,543910,543893,543897],"tristab":[233793,232871,232836,232839],"vfw":[394411,393571,393554,393558],"wiesel":[351832,351056,351013,351017],"ztz99a":[382359,381345,381318,381322]}</script>
+<script src="app.js?v=eedecef3" onerror="window.__appFail&&window.__appFail(event)"></script>
 </body>
 </html>
