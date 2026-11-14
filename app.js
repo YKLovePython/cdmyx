@@ -7778,31 +7778,55 @@ function physStep(dt, thr, str){
 }
 
 /* ---------------------------------------------------------------- 启动 Rapier */
-/* Rapier（含内联 wasm，约 1.35 MB brotli）不再打进 app.js：
-   车库选车不需要物理，拆分后首屏少下 1.35 MB，而且 app.js 改版不会连带重下它。
-   进入战斗或空闲时再加载 rapier.js。 */
+/* Rapier（含内联 wasm）不再打进 app.js：车库不需要物理，拆开后首屏更小，
+   而且它也被切成 4 片并行下载（慢链路单流只有 50–60 KB/s）。 */
 var RAPIER = null;
-const RAPIER_VER = 'r1';           // rapier.js 内容换代时改，配合 _headers 的 immutable
+const RAPIER_VER = 'r2';           // rapier 分片内容换代时改，配合 immutable 缓存
 let PHYS_LOAD = null;
+
+async function loadRapier(){
+  const n = (window.__RAPIER_PARTS || []).length || 4;
+  const url = k => 'rapier.p' + k + '.js?v=' + RAPIER_VER;
+  window.__VP = [];
+  if(typeof CAN_FETCH !== 'undefined' && CAN_FETCH){
+    await Promise.all(Array.from({ length: n }, async (_, k) => {
+      const r = await fetch(url(k), { credentials: 'same-origin' });
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      (0, eval)(await r.text());
+    }));
+  }else{
+    await new Promise((resolve, reject) => {
+      let done = 0;
+      for(let k = 0; k < n; k++){
+        const s = document.createElement('script');
+        s.src = url(k);
+        s.async = true;
+        s.onload = () => { if(++done === n) resolve(); };
+        s.onerror = () => reject(new Error('rapier 分片加载失败'));
+        document.head.appendChild(s);
+      }
+    });
+  }
+  const src = (window.__VP || []).join('');
+  window.__VP = null;
+  (0, eval)(src);
+}
+
 function physEnsure(){
   if(PHYS_LOAD) return PHYS_LOAD;
-  PHYS_LOAD = new Promise((resolve, reject) => {
-    if(PHYS.world){ resolve(); return; }
-    const s = document.createElement('script');
-    s.src = 'rapier.js?v=' + (typeof RAPIER_VER !== 'undefined' ? RAPIER_VER : '1');
-    s.onload = () => {
-      try{
-        if(!RAPIER) throw new Error('rapier.js 没有导出 RAPIER');
-        RAPIER.init().then(() => {
-          try{ physBuildWorld(); }catch(e){ PHYS.err = e; console.error('Rapier 世界创建失败：', e); }
-          resolve();
-        }).catch(e => { PHYS.err = e; console.error('Rapier 初始化失败：', e); reject(e); });
-      }catch(e){ PHYS.err = e; console.error('Rapier 初始化失败：', e); reject(e); }
-    };
-    s.onerror = () => { PHYS.err = new Error('rapier.js 加载失败'); reject(PHYS.err); };
-    document.head.appendChild(s);
+  PHYS_LOAD = (async () => {
+    if(PHYS.world) return;
+    await loadRapier();
+    if(!RAPIER) throw new Error('rapier 分片没有导出 RAPIER');
+    await RAPIER.init();
+    try{ physBuildWorld(); }
+    catch(e){ PHYS.err = e; console.error('Rapier 世界创建失败：', e); }
+  })();
+  PHYS_LOAD.catch((e) => {
+    PHYS.err = e;
+    console.error('Rapier 初始化失败：', e);
+    PHYS_LOAD = null;                 // 失败允许下次重试
   });
-  PHYS_LOAD.catch(() => { PHYS_LOAD = null; });   // 失败允许下次重试
   return PHYS_LOAD;
 }
 
@@ -9737,8 +9761,17 @@ function startGame(){
   /* 手机：进战斗时顺手请求横屏（用户手势里，全屏 + orientation lock 才被允许） */
   if(TOUCH && typeof window.goLandscape === 'function') window.goLandscape();
   if(typeof audioInit === 'function') audioInit();
-  /* 物理引擎拆成独立文件，进战斗时才下载/初始化（车库不需要） */
-  if(typeof physEnsure === 'function') physEnsure().catch(() => {});
+  /* 物理引擎拆成独立分片，进战斗时才下载/初始化（车库不需要） */
+  if(typeof physEnsure === 'function'){
+    if(!PHYS.world && hint){
+      const oldText = hint.textContent;
+      hint.textContent = '物理引擎加载中…';
+      hint.style.opacity = '1';
+      physEnsure().then(() => { hint.textContent = oldText; }).catch(() => { hint.textContent = oldText; });
+    }else{
+      physEnsure().catch(() => {});
+    }
+  }
   netOnStart();                       // 联机：开始广播自己的状态
   tryLock();                        // 点击/回车都是用户手势，可以直接锁
 }
@@ -11557,6 +11590,10 @@ function bootEnd(){
   if(!pendingStart){
     if(USE_MODEL) garageTimer = setInterval(updateGarageLoad, 150);
     else updateGarageLoad();
+    /* 车库空闲时就把物理引擎下下来（4 片并行），进战斗时通常已经就绪 */
+    setTimeout(() => {
+      if(typeof physEnsure === 'function') physEnsure().catch(() => {});
+    }, 1500);
   }
   if(pendingStart) startGame();
 }
