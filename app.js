@@ -2275,10 +2275,13 @@ async function fetchVehicle(id){
   (0, eval)(text);
 }
 
+/* 下载进度监听：启动画面和车库各注册一个，互不抢 */
+const VEH_PROGRESS = [];
+function addVehProgress(fn){ if(typeof fn === 'function') VEH_PROGRESS.push(fn); }
 function vehProgress(id, got, total){
-  try{
-    if(typeof window.__vehProgress === 'function') window.__vehProgress(id, got, total);
-  }catch(e){}
+  for(const fn of VEH_PROGRESS){
+    try{ fn(id, got, total); }catch(e){}
+  }
 }
 
 /* 经典 <script> 注入：file:// 或 fetch 失败时使用；带重试与目录回退 */
@@ -9509,6 +9512,15 @@ let garageIdx = 0;
 let garageTimer = 0;
 let selToken = 0;              // 切车令牌：晚到的加载结果直接丢掉
 let loadState = 'idle';        // idle | loading | ready | error | proc | empty
+let gdlGot = 0, gdlTotal = 0;  // 车库切车时的下载进度（字节）
+
+/* 切车下载进度：启动画面结束后由车库接管显示 */
+addVehProgress((id, got, total) => {
+  if(!bootDone) return;                         // 启动阶段交给 90_boot
+  if(loadState !== 'loading' || id !== SELECTED_ID) return;
+  gdlGot = got; gdlTotal = total;
+  updateGarageLoad();
+});
 
 /* 把 0..5 的数值画成一行「标签 + 条 + 数字」 */
 function vstat(label, v){
@@ -9653,8 +9665,15 @@ function cycleNation(dir){
 /* ---------------- 载入状态 ---------------- */
 function updateGarageLoad(){
   if(loadState === 'loading'){
-    if(gbarEl)  gbarEl.style.width = '0%';
-    if(gloadEl) gloadEl.textContent = '载入中…';
+    if(gdlTotal > 0){
+      const p = Math.min(1, gdlGot / gdlTotal);
+      if(gbarEl)  gbarEl.style.width = (p * 100).toFixed(1) + '%';
+      if(gloadEl) gloadEl.textContent =
+        `下载 ${(gdlGot / 1048576).toFixed(1)} / ${(gdlTotal / 1048576).toFixed(1)} MB`;
+    }else{
+      if(gbarEl)  gbarEl.style.width = '0%';
+      if(gloadEl) gloadEl.textContent = '载入中…';
+    }
     return;
   }
   if(loadState === 'error'){
@@ -9775,6 +9794,7 @@ async function applyVehicle(id){
 
   if(USE_MODEL){
     loadState = 'loading';
+    gdlGot = 0; gdlTotal = 0;
     updateGarageLoad();
 
     let data;
@@ -11541,7 +11561,7 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(async () => {
   }catch(e){ reportError('meshopt 解码器初始化失败：' + (e && e.message || e)); }
 
   /* 下载进度：16% → 34%，总字节来自 build.js 注入的 __VEH_BYTES */
-  window.__vehProgress = (id, got, total) => {
+  addVehProgress((id, got, total) => {
     if(bootDone) return;
     const nm = (VEHICLES[id] || {}).name || id;
     const mb = n => (n / 1048576).toFixed(2);
@@ -11549,7 +11569,7 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(async () => {
     bootSet(16 + 18 * p, total
       ? `下载 ${nm}  ${mb(got)} / ${mb(total)} MB  ${(p * 100).toFixed(0)}%`
       : `下载 ${nm}  ${mb(got)} MB`);
-  };
+  });
 
   try{
     await selectVehicle(wantId);           // 注入数据 -> 反 base64 -> 上传 VAO
