@@ -2176,8 +2176,10 @@ const VDATA_KEEP = 6;              // 联机时可能同时有本地车 + 几个
 const VEH_SRC_LO  = 'data/veh_lo/';
 const VEH_SRC_RAW = 'data/veh/';
 /* 数据格式版本（meta.geoFmt 换代时改），让浏览器缓存失效 */
-const VEH_VER = 'm1';
+const VEH_VER = '5ae1491f';
 let VEH_SRC = (typeof Q !== 'undefined' && Q.get('tex') === 'lo') ? VEH_SRC_LO : VEH_SRC_RAW;
+/* http(s) 才能 fetch；file:// 双击仍然是 <script> 注入 */
+const CAN_FETCH = (typeof fetch === 'function') && /^https?:$/.test(location.protocol);
 
 const VDATA       = new Map();   // id -> { meta, tex, geo }
 const VDATA_WAIT  = new Map();   // id -> Promise
@@ -2215,29 +2217,87 @@ function loadVehicleData(id){
   if(VDATA_WAIT.has(id)) return VDATA_WAIT.get(id);
 
   VDATA_BUSY = id;
-  const p = new Promise((resolve, reject) => {
-    let attempt = 0;
-    let settled = false;
-
-    const settle = (ok) => {
-      if(settled) return;
-      settled = true;
+  const p = (async () => {
+    try{
+      /* http(s) 下用 fetch 流式读，能给出真实下载进度；file:// 下 fetch 被禁，
+         或者 fetch 失败（代理/断流）就退回经典 <script> 注入。 */
+      if(CAN_FETCH){
+        try{
+          await fetchVehicle(id);
+          if(VDATA.has(id)) return VDATA.get(id);
+        }catch(e){ /* 落到 script 路径 */ }
+      }
+      await scriptVehicle(id);
+      if(VDATA.has(id)) return VDATA.get(id);
+      throw new Error('数据未注册');
+    }finally{
       if(VDATA_BUSY === id) VDATA_BUSY = null;
       VDATA_WAIT.delete(id);
-      if(ok && VDATA.has(id)){ resolve(VDATA.get(id)); return; }
-      const old = VDATA_SCRIPT.get(id);
-      if(old && old.parentNode) old.parentNode.removeChild(old);
-      VDATA_SCRIPT.delete(id);
-      reject(new Error(ok ? '数据未注册' : '文件缺失或无法读取'));
+    }
+  })();
+  VDATA_WAIT.set(id, p);
+  p.catch(() => {});                 // 调用处会自己 catch，这里避免未处理拒绝
+  return p;
+}
+
+/* 数据文件 URL：带格式版本，换格式/换数据时由 build.js 自动换掉 */
+function vehUrl(id, attempt){
+  return VEH_SRC + id + '.js?v=' + VEH_VER +
+    (attempt > 1 ? '&retry=' + attempt : '');
+}
+
+/* fetch 流式下载 + 进度回调（总长来自 build.js 注入的 __VEH_BYTES） */
+async function fetchVehicle(id){
+  const total = (window.__VEH_BYTES && window.__VEH_BYTES[id]) || 0;
+  const resp = await fetch(vehUrl(id, 1), { credentials: 'same-origin' });
+  if(!resp.ok) throw new Error('HTTP ' + resp.status);
+
+  let text;
+  if(resp.body && resp.body.getReader){
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let got = 0;
+    for(;;){
+      const r = await reader.read();
+      if(r.done) break;
+      chunks.push(r.value);
+      got += r.value.length;
+      vehProgress(id, got, total);
+    }
+    const all = new Uint8Array(got);
+    let off = 0;
+    for(const c of chunks){ all.set(c, off); off += c.length; }
+    text = new TextDecoder().decode(all);
+  }else{
+    text = await resp.text();
+  }
+  /* 数据文件是 (function(){ registerVehicleData(...) })()，间接 eval 在全局作用域跑 */
+  (0, eval)(text);
+}
+
+function vehProgress(id, got, total){
+  try{
+    if(typeof window.__vehProgress === 'function') window.__vehProgress(id, got, total);
+  }catch(e){}
+}
+
+/* 经典 <script> 注入：file:// 或 fetch 失败时使用；带重试与目录回退 */
+function scriptVehicle(id){
+  return new Promise((resolve, reject) => {
+    let attempt = 0;
+
+    const fail = () => {
+      /* 大文件 + 慢网：超时/失败自动重试一次 */
+      if(attempt < 2){ start(); return; }
+      /* 贴图实验版目录里没有这辆车：退回原版再试一次 */
+      if(VEH_SRC !== VEH_SRC_RAW){ VEH_SRC = VEH_SRC_RAW; attempt = 0; start(); return; }
+      reject(new Error('文件缺失或无法读取'));
     };
 
     const start = () => {
       attempt++;
       const s = document.createElement('script');
-      /* 数据格式版本：换格式（如 meshopt）时改这里，旧缓存自动失效；
-         重试再加一个参数绕过可能已损坏的缓存 */
-      s.src = VEH_SRC + id + '.js?v=' + VEH_VER +
-        (attempt > 1 ? '&retry=' + attempt : '');
+      s.src = vehUrl(id, attempt);
       s.async = true;
       let done = false, timer = 0;
 
@@ -2245,27 +2305,23 @@ function loadVehicleData(id){
         if(done) return;
         done = true;
         clearTimeout(timer);
-        if(VDATA.has(id)) settle(true);
-        else fail('数据未注册');
+        if(VDATA.has(id)) resolve(VDATA.get(id));
+        else fail();
       };
-      const fail = (why) => {
+      const bad = () => {
         if(done) return;
         done = true;
         clearTimeout(timer);
         if(s.parentNode) s.parentNode.removeChild(s);
         VDATA_SCRIPT.delete(id);
-        /* 大文件 + 慢网：超时/失败自动重试一次 */
-        if(attempt < 2){ start(); return; }
-        /* 贴图实验版目录里没有这辆车：退回原版再试一次 */
-        if(VEH_SRC !== VEH_SRC_RAW){ VEH_SRC = VEH_SRC_RAW; attempt = 0; start(); return; }
-        settle(false);
+        fail();
       };
 
       /* 载具数据文件可达 20 MB，慢网下 20 s 根本不够 */
-      timer = setTimeout(() => { if(VDATA.has(id)) ok(); else fail('超时'); }, 120000);
+      timer = setTimeout(() => { if(VDATA.has(id)) ok(); else bad(); }, 120000);
 
       s.onload = ok;
-      s.onerror = () => fail('error');
+      s.onerror = bad;
 
       VDATA_SCRIPT.set(id, s);
       document.head.appendChild(s);
@@ -2273,9 +2329,6 @@ function loadVehicleData(id){
 
     start();
   });
-  VDATA_WAIT.set(id, p);
-  p.catch(() => {});                 // 调用处会自己 catch，这里避免未处理拒绝
-  return p;
 }
 
 /* 调试用 */
@@ -11486,6 +11539,17 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(async () => {
     if(typeof MeshoptDecoder !== 'undefined' && MeshoptDecoder.ready)
       await MeshoptDecoder.ready;
   }catch(e){ reportError('meshopt 解码器初始化失败：' + (e && e.message || e)); }
+
+  /* 下载进度：16% → 34%，总字节来自 build.js 注入的 __VEH_BYTES */
+  window.__vehProgress = (id, got, total) => {
+    if(bootDone) return;
+    const nm = (VEHICLES[id] || {}).name || id;
+    const mb = n => (n / 1048576).toFixed(2);
+    const p = total ? Math.min(1, got / total) : 0;
+    bootSet(16 + 18 * p, total
+      ? `下载 ${nm}  ${mb(got)} / ${mb(total)} MB  ${(p * 100).toFixed(0)}%`
+      : `下载 ${nm}  ${mb(got)} MB`);
+  };
 
   try{
     await selectVehicle(wantId);           // 注入数据 -> 反 base64 -> 上传 VAO
