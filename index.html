@@ -87,6 +87,13 @@
   #ammo{font-size:31px;line-height:.86;font-weight:600;letter-spacing:.01em;color:#eff2ef;
     font-variant-numeric:tabular-nums}
   #ammobox.reloading #ammo{color:#e6b58a}
+  #ammobox.missile #ammo{color:#e3b06a}
+  #wslots{display:flex;flex-direction:column;gap:3px;padding-bottom:3px;margin-right:2px}
+  #wslots[hidden]{display:none}
+  #wslots span{font-size:9px;letter-spacing:.1em;color:rgba(223,227,226,.38);
+    white-space:nowrap;font-variant-numeric:tabular-nums}
+  #wslots span.on{color:var(--gold)}
+  #wslots span.on::before{content:"▸ ";color:var(--gold)}
   #ammometa{display:flex;flex-direction:column;gap:5px;padding-bottom:2px}
   #ammometa span{font-size:9px;letter-spacing:.16em;color:rgba(223,227,226,.42);white-space:nowrap}
   #reloadbar{display:block;width:78px;height:2px;background:rgba(255,255,255,.12);overflow:hidden}
@@ -401,6 +408,7 @@
   body.touch #ammobox{left:50%;bottom:12px}
   body.touch #ammo{font-size:22px}
   body.touch #ammometa span{font-size:8px}
+  body.touch #wslots span{font-size:8px}
   body.touch #reloadbar{width:56px}
   body.touch #mgheat{width:48px}
   body.touch #spdbox{left:8px;right:auto;top:96px;bottom:auto;text-align:left}
@@ -553,6 +561,7 @@
   </div>
 
   <div id="ammobox">
+    <div id="wslots" hidden></div>
     <b id="ammo">320</b>
     <div id="ammometa"><span>30 mm · 待发</span><i id="reloadbar"><u></u></i>
       <div id="mgrow" hidden><b id="mgcal">MG 7.62</b><i id="mgheat"><u></u></i></div>
@@ -614,7 +623,8 @@
         <div id="gdesc"></div>
         <div id="glegend">A/D 选车 · Q/E 换阵营 · Enter 进入测试<br>
         W/S 油门 · A/D 转向 · 左键 开火 · Shift 炮镜<br>
-        Space 车顶机枪 · E/Q 巡航 · 按住 C 自由视角 · M 静音 · Esc 暂停<br>
+        1/2/3 切换武器 · Space/F 车顶机枪 · Ctrl/R 导弹<br>
+        E/Q 巡航 · 按住 C 自由视角 · M 静音 · Esc 暂停<br>
         <span style="opacity:.55">场景为程序化白模，零下载 · 载具模型仅本地使用</span></div>
       </div>
       <div id="gfoot">
@@ -696,11 +706,11 @@
 (function(){
   try{
     if(!/(^|[?&])map=kursk(&|$)/.test(location.search)) return;
-    document.write('<script src="data/map/kursk.js?v=mwfu12o9"><\/script>');
-    document.write('<script src="data/map/houses.js?v=mwfu12o9"><\/script>');
+    document.write('<script src="data/map/kursk.js?v=mwg08ddf"><\/script>');
+    document.write('<script src="data/map/houses.js?v=mwg08ddf"><\/script>');
   }catch(e){}
 })();
 </script>
-<script src="app.js?v=mwfu12o9"></script>
+<script src="app.js?v=mwg08ddf"></script>
 </body>
 </html>

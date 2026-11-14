@@ -1608,7 +1608,7 @@ const NATIONS = {
   us: { id: 'us', name: '美国',   short: 'US', color: '#5f8ed0' },
   de: { id: 'de', name: '德国',   short: 'DE', color: '#a9adb4' },
 };
-const NATION_ORDER = ['de', 'us'];
+const NATION_ORDER = ['de', 'us', 'ru', 'cn'];
 
 /* ---- 年代 / 定位标签 ---- */
 const ERA_LABEL = { ww2: '二战', cold: '冷战', modern: '现代' };
@@ -1619,11 +1619,29 @@ const ROLE_LABEL = {
 
 const DEFAULT_ID = 'pz4h';
 
-/* 车库首批开放名单：德 6 + 美 6。其余已烘焙的车仍可用 ?veh=<id> 直开，
-   等这一批跑顺了再把 LIBRARY 补到德 20 + 美 26。                       */
+/* 轮式判定：显式 drive:'wheeled'，或「没有履带件且轮子数 >= 4」。
+   steerAxles 缺省按每侧轴数推断：>=3 轴取前 2，否则前 1。
+   物理（69）和渲染（36）共用这一份，避免两边判断不一致。 */
+function wheelDriveInfo(V, meta){
+  const parts = (meta && meta.parts) || [];
+  const wheels = (meta && meta.wheels) || [];
+  const hasTrack = parts.includes('trackL') || parts.includes('trackR');
+  const perSide = Math.max(
+    wheels.filter(w => w.side > 0).length,
+    wheels.filter(w => w.side < 0).length
+  );
+  const wheeled = !!(V && V.drive === 'wheeled') || (!hasTrack && wheels.length >= 4);
+  let steerAxles = V && V.steerAxles;
+  if(wheeled && !steerAxles) steerAxles = perSide >= 3 ? 2 : 1;
+  return { wheeled, steerAxles, perSide };
+}
+
+/* 车库开放名单：德 6 + 美 6 + 俄 2 + 中 1 + 德轮式 1。其余已烘焙的车
+   仍可用 ?veh=<id> 直开，等这一批跑顺了再继续补。                       */
 const LIBRARY = [
   'pz4h', 'tiger1', 'tiger2', 'pantherg', 'leo2a4', 'leo2a7v',
   'm1a2', 'm3', 'm18', 'm4a3e8', 'm36', 'm60',
+  'bmpt', 'pantsir', 'ztz99a', 'rad90',
 ];
 
 const VEHICLES = {
@@ -1637,8 +1655,55 @@ const VEHICLES = {
     sight: [0, 2.66, -0.10],
     weapon: { name: '2A42 30mm ×2', short: '30mm ×2', rpm: 520, v0: 960,
               spread: 0.0014, dmg: 10, mag: 320, reload: 4.5, g: 9.81 },
+    weapons: [
+      { kind: 'gun', name: '2A42 30mm ×2', short: '30mm ×2', rpm: 520, v0: 960,
+        spread: 0.0014, dmg: 10, mag: 320, reload: 4.5, g: 9.81 },
+      { kind: 'missile', name: '9M120 旋风反坦克导弹', short: '9M120',
+        rpm: 42, v0: 95, speedMax: 520, accel: 300, turnRate: 1.45,
+        spread: 0.0012, dmg: 250, mag: 4, reload: 22.0, g: 0,
+        boost: 0.35, range: 2800, launchFrame: 'turret',
+        launch: [
+          [ 0.972, 2.637, 0.190], [-0.989, 2.352, 0.190],
+          [ 0.971, 2.352, 0.190], [-0.990, 2.637, 0.190],
+        ] },
+    ],
     stat: { spd: 3.0, fire: 4.6, armor: 3.4 },
-    desc: '双联 30mm 自动炮 · 高射速近距离压制',
+    desc: '双联 30mm 自动炮 + 4 发 9M120 导弹（Ctrl）',
+  },
+  pantsir: {
+    id: 'pantsir', name: '铠甲-S1', full: '铠甲-S1 弹炮合一防空系统', tag: 'PANTSIR',
+    nation: 'ru', era: 'modern', role: 'spaa',
+    muzzlePair: true, trackDir: 1,
+    /* 铠甲-S1 是 8×8 轮式卡车底盘，没有履带：前两轴转向 */
+    drive: 'wheeled', steerAxles: 2,
+    steerMax: 0.70, steerDrop: 0.40, ackermann: 0.10,
+    steerRate: 2.0, steerReturn: 3.0,
+    engineForce: 6.0, engineResponse: 6.0,
+    frictionSlip: 8.0, sideFriction: 1.0,
+    maxSpeed: 14.5, reverseSpeed: 5.8, turnRate: 2.15,
+    turretRate: 0.90, gunRate: 0.70,
+    gunMin: -0.10, gunMax: 0.85,
+    sight: [0.008, 4.277, -1.018],
+    weapon: { name: '2A38M 30mm ×2', short: '30mm ×2', rpm: 900, v0: 970,
+              spread: 0.0015, dmg: 9, mag: 400, reload: 5.0, g: 9.81 },
+    weapons: [
+      { kind: 'gun', name: '2A38M 30mm ×2', short: '30mm ×2', rpm: 900, v0: 970,
+        spread: 0.0015, dmg: 9, mag: 400, reload: 5.0, g: 9.81 },
+      { kind: 'missile', name: '57E6 防空导弹', short: '57E6',
+        rpm: 32, v0: 120, speedMax: 480, accel: 280, turnRate: 2.0,
+        spread: 0.0010, dmg: 250, mag: 12, reload: 30.0, g: 0,
+        boost: 0.35, range: 1200, launchFrame: 'gun',
+        launch: [
+          [-1.460, 3.771, 0.720], [-1.158, 3.771, 0.720],
+          [-1.158, 3.477, 0.720], [-1.460, 3.477, 0.720],
+          [-1.460, 3.184, 0.720], [-1.158, 3.184, 0.720],
+          [ 1.168, 3.184, 0.720], [ 1.471, 3.184, 0.720],
+          [ 1.471, 3.477, 0.720], [ 1.168, 3.477, 0.720],
+          [ 1.168, 3.771, 0.720], [ 1.471, 3.771, 0.720],
+        ] },
+    ],
+    stat: { spd: 3.4, fire: 4.8, armor: 2.4 },
+    desc: '双联 30mm + 12 发 57E6 导弹（Ctrl）· 1.2 km 面压制',
   },
   ztz99a: {
     id: 'ztz99a', name: 'ZTZ99A', full: 'ZTZ99A 主战坦克', tag: 'ZTZ99A',
@@ -2038,6 +2103,12 @@ const VEHICLES = {
     id: 'rad90', name: 'Rad 90', full: '轮式战车 90', tag: 'RAD90',
     nation: 'de', era: 'cold', role: 'wheeled',
     muzzlePair: false, trackDir: 1,
+    /* 轮式：前两轴转向，Rapier 自带轮胎摩擦；无低速原地转向辅助 */
+    drive: 'wheeled', steerAxles: 2,
+    steerMax: 0.70, steerDrop: 0.40, ackermann: 0.10,
+    steerRate: 2.0, steerReturn: 3.0,
+    engineForce: 6.0, engineResponse: 6.0,
+    frictionSlip: 8.0, sideFriction: 1.0,
     maxSpeed: 18.0, reverseSpeed: 7.5, turnRate: 2.60,
     turretRate: 0.85, gunRate: 0.50,
     gunMin: -0.09, gunMax: 0.30,
@@ -2574,6 +2645,23 @@ function buildModel(data, id){
   P.data = data;
   P.ready = true;
 
+  /* 轮式转向轮标记：每侧按 z 排序取前 steerAxles 个（履带车为 null） */
+  P.wheelSteer = null;
+  {
+    const wd = wheelDriveInfo(VEHICLES[P.id], M);
+    const sa = Math.abs(wd.steerAxles || 0);
+    if(wd.wheeled && sa > 0 && M.wheels && M.wheels.length){
+      const dir = Math.sign(wd.steerAxles) || 1;
+      P.wheelSteer = M.wheels.map(w => {
+        let rank = 0;
+        for(const x of M.wheels){
+          if(x.side === w.side && (x.c[2] * dir) > (w.c[2] * dir) + 1e-6) rank++;
+        }
+        return rank < sa;
+      });
+    }
+  }
+
   /* ---- 占位贴图（贴图还没到时先显示成灰铁色） ---- */
   if(!TEX_WHITE){
     TEX_WHITE = modelSolidTex(150, 150, 150, 255);
@@ -2721,7 +2809,16 @@ function modelPartMat(part, P, mats, travelL, travelR){
       dy = (groundH(wx, wz) + w.c[1]) - wy;
       if(dy > 0.18) dy = 0.18; else if(dy < -0.18) dy = -0.18;
     }
-    return M4.mul(M4.mul(mats.vehM, M4.translate(w.c[0], w.c[1] + dy, w.c[2])), M4.rotX(ang));
+    /* 轮式：先绕 Y 偏转（转向），再绕轮轴自旋；只有前 N 轴转 */
+    const wi = +part.slice(6);
+    const steer = (P.wheelSteer && P.wheelSteer[wi])
+                ? (w.side > 0 ? (mats.steerL || 0) : (mats.steerR || 0))
+                : 0;
+    const base = M4.translate(w.c[0], w.c[1] + dy, w.c[2]);
+    if(steer){
+      return M4.mul(M4.mul(M4.mul(mats.vehM, base), M4.rotY(steer)), M4.rotX(ang));
+    }
+    return M4.mul(M4.mul(mats.vehM, base), M4.rotX(ang));
   }
   return mats.vehM;                             // hull / trackL / trackR
 }
@@ -4098,11 +4195,17 @@ void main(){
 
 /* ===================== 55_combat.js ===================== */
 /* ============================ 武器 · 弹道 · 命中 ============================ */
-/*  单武器、无弹种：双联 30mm 自动炮。
+/*  每车 1~3 个武器槽：火炮/机炮走常重力弹道，导弹走 SACLOS 制导。
     弹道 = 常重力积分 + 逐段线段求交（不做风偏/空气阻力）。
-    视觉全部是程序化粒子：曳光、炮口焰、火花、地面扬尘。          */
+    视觉全部是程序化粒子：曳光、炮口焰、导弹尾烟、火花、地面扬尘。 */
 
+/*  2026-11：单武器 → 每车 1~3 个武器槽（数字键 1/2/3 切换，左键打当前槽）。
+    槽分两类：
+      kind:'gun'     常规火炮/机炮，走原来的弹道积分
+      kind:'missile' 导弹，Ctrl 发射，出管后按准星做 SACLOS 制导
+    没有 weapons 数组的老车自动把原来的 weapon 包成 1 个槽，手感完全不变。 */
 let WPN = {
+  kind:   'gun',
   name:   '2A42 30mm ×2',
   rpm:    520,        // 两管合计射速
   v0:     960,        // 初速 m/s
@@ -4113,7 +4216,7 @@ let WPN = {
   g:      9.81,
 };
 
-const weapon = {
+let weapon = {
   ammo: WPN.mag,
   reloading: 0,
   next: 0,
@@ -4121,7 +4224,41 @@ const weapon = {
   firedAt: -99,
 };
 
+let WSLOTS = [WPN];                 // 当前车的武器槽配置
+let WSTATE = [weapon];              // 每个槽的弹药 / 装填状态
+let WSLOT  = 0;                     // 当前选中的槽
+let WSLOT_DIRTY = true;             // HUD 需要重建槽位条
+
+function setWeaponSlots(V){
+  const src = (V && V.weapons && V.weapons.length) ? V.weapons : [V && V.weapon];
+  WSLOTS = src.filter(Boolean).map(w => Object.assign({ kind: 'gun' }, w));
+  if(!WSLOTS.length) WSLOTS = [Object.assign({ kind: 'gun' }, WPN)];
+  WSTATE = WSLOTS.map(w => ({
+    ammo: w.mag, reloading: 0, next: 0, barrel: 0, firedAt: -99,
+  }));
+  WSLOT = 0;
+  WPN = WSLOTS[0];
+  weapon = WSTATE[0];
+  WSLOT_DIRTY = true;
+  MISSILES.length = 0;              // 换车时把上一辆车的导弹清掉
+}
+
+function selectWeaponSlot(i){
+  if(i < 0 || i >= WSLOTS.length || i === WSLOT) return;
+  WSLOT = i;
+  WPN = WSLOTS[i];
+  weapon = WSTATE[i];
+  WSLOT_DIRTY = true;
+  if(typeof sndClick === 'function') sndClick(true);
+}
+
+function missileSlotIndex(){
+  for(let i=0;i<WSLOTS.length;i++) if(WSLOTS[i].kind === 'missile') return i;
+  return -1;
+}
+
 const SHELLS = [];
+const MISSILES = [];                 // 制导导弹：本地弹道 + 远端视觉弹
 const SPARKS = [];
 const FLASHES = [];   // 星芒 / 光晕 / 火球（kind: 0 软点 1 星芒 2 烟）
 const TRACERS = [];   // 每帧一段，短寿命拖尾
@@ -4308,14 +4445,16 @@ function gunMuzzleWorld(i, out){
   return p;
 }
 
-/* ---------------- 开火 ---------------- */
-function fireShot(t){
+/* ---------------- 开火（常规火炮 / 机炮） ---------------- */
+function fireGun(t, idx){
+  const cfg = WSLOTS[idx], st = WSTATE[idx];
+  if(!cfg || !st) return;
   buildMatrices();                       // 炮口必须用本帧姿态
   const dir = gunDirWorld();
-  const mz = gunMuzzleWorld(weapon.barrel);
-  weapon.barrel ^= 1;
+  const mz = gunMuzzleWorld(st.barrel);
+  st.barrel ^= 1;
 
-  const sp = WPN.spread;
+  const sp = cfg.spread;
   const d = norm3([
     dir[0] + (Math.random()-0.5)*2*sp,
     dir[1] + (Math.random()-0.5)*2*sp,
@@ -4325,9 +4464,11 @@ function fireShot(t){
   SHELLS.push({
     p: [mz[0], mz[1], mz[2]],
     prev: [mz[0], mz[1], mz[2]],
-    v: [d[0]*WPN.v0, d[1]*WPN.v0, d[2]*WPN.v0],
+    v: [d[0]*cfg.v0, d[1]*cfg.v0, d[2]*cfg.v0],
     life: 7.0,
     alive: true,
+    dmg: cfg.dmg,
+    g: cfg.g,
   });
 
   /* 炮口焰：星芒 + 外层光晕 + 烟，每发随机旋转/大小 */
@@ -4374,14 +4515,235 @@ function fireShot(t){
   }
   /* 动态光：照亮车体与地面 */
   LIGHTS.push({ p: [mz[0], mz[1], mz[2]], col: [1.0, 0.55, 0.22], intensity: 5.0, life: 0.09, maxLife: 0.09 });
-  weapon.firedAt = t;
+  st.firedAt = t;
 
   /* 声音 + 一点点后坐震屏 */
   sndShot(mz, true);
   addShake(0.10);
 
   /* 联机：告诉其他玩家「我在哪、朝哪开火」，他们那边放炮口焰和视觉弹道 */
-  netOnShot(mz, d);
+  netOnShot(mz, d, cfg.v0);
+}
+
+/* ---------------- 导弹：发射 / 制导 / 命中 ---------------- */
+function fireMissile(t, idx){
+  const cfg = WSLOTS[idx], st = WSTATE[idx];
+  if(!cfg || !st || !cfg.launch || !cfg.launch.length) return;
+  buildMatrices();                       // 发射箱随炮塔/火炮转到位再取点
+
+  const frame = cfg.launchFrame === 'gun' ? gunM : turretM;
+  const lp = cfg.launch[(st.barrel++) % cfg.launch.length];
+  const mz = M4.point(frame, lp);
+
+  const dir = gunDirWorld();
+  const sp = cfg.spread || 0;
+  const d = norm3([
+    dir[0] + (Math.random()-0.5)*2*sp,
+    dir[1] + (Math.random()-0.5)*2*sp,
+    dir[2] + (Math.random()-0.5)*2*sp,
+  ]);
+
+  MISSILES.push({
+    p: [mz[0], mz[1], mz[2]],
+    v: [d[0]*cfg.v0, d[1]*cfg.v0, d[2]*cfg.v0],
+    dmg: cfg.dmg,
+    range: cfg.range || 2500,
+    speedMax: cfg.speedMax || 500,
+    accel: cfg.accel || 280,
+    turnRate: cfg.turnRate || 1.5,
+    boost: cfg.boost == null ? 0.35 : cfg.boost,
+    t: 0, traveled: 0, life: 28,
+    smokeT: 0, alive: true, ghost: false,
+  });
+
+  /* 发射尾焰：一小团白热 + 一圈烟 */
+  FLASHES.push({
+    p: [mz[0], mz[1], mz[2]], dir: d, life: 0.10, maxLife: 0.10,
+    size: rr(0.65, 0.95), seed: Math.random(), kind: 1,
+    col: [4.4, 2.9, 1.5, 1.0],
+  });
+  FLASHES.push({
+    p: [mz[0]+d[0]*0.2, mz[1]+d[1]*0.2, mz[2]+d[2]*0.2], dir: d,
+    life: 0.30, maxLife: 0.30, size: rr(1.3, 1.8), seed: Math.random(), kind: 2,
+    col: [0.85, 0.80, 0.74, 0.55],
+  });
+  for(let i=0;i<6;i++){
+    SMOKES.push({
+      p: [mz[0]+rr(-0.2,0.2), mz[1]+rr(-0.2,0.2), mz[2]+rr(-0.2,0.2)],
+      v: [d[0]*rr(1.5,4.0)+rr(-0.8,0.8), rr(0.2,1.4), d[2]*rr(1.5,4.0)+rr(-0.8,0.8)],
+      life: rr(0.5,1.1), maxLife: 1.1, size: rr(0.28,0.58), seed: Math.random(),
+    });
+  }
+  LIGHTS.push({ p: [mz[0], mz[1], mz[2]], col: [1.0, 0.62, 0.28], intensity: 6.0,
+                life: 0.16, maxLife: 0.16 });
+  st.firedAt = t;
+  if(typeof sndMissile === 'function') sndMissile(mz);
+  addShake(0.06);
+  netOnMissile(mz, d);
+}
+
+/* SACLOS：出管 boost 秒后，弹体朝「准星射线前方 120 m」收敛，转速受 turnRate 限制 */
+function missileGuide(m, dt){
+  if(m.t < m.boost) return;
+  const cp = Math.cos(aimPitch);
+  const ax = Math.sin(aimYaw) * cp, ay = Math.sin(aimPitch), az = Math.cos(aimYaw) * cp;
+  const ox = car.pos[0], oy = car.pos[1] + PIVOT_GUN[1], oz = car.pos[2];
+  const proj = (m.p[0]-ox)*ax + (m.p[1]-oy)*ay + (m.p[2]-oz)*az;
+  const ahead = Math.max(140, proj + 150);
+  const gx = ox + ax*ahead, gy = oy + ay*ahead, gz = oz + az*ahead;
+
+  let wx = gx - m.p[0], wy = gy - m.p[1], wz = gz - m.p[2];
+  const wl = Math.hypot(wx, wy, wz);
+  if(wl < 1e-5) return;
+  wx /= wl; wy /= wl; wz /= wl;
+
+  const sp = Math.hypot(m.v[0], m.v[1], m.v[2]) || 1;
+  const vx = m.v[0] / sp, vy = m.v[1] / sp, vz = m.v[2] / sp;
+  const dot = clamp(vx*wx + vy*wy + vz*wz, -1, 1);
+  const ang = Math.acos(dot);
+  const maxA = m.turnRate * dt;
+  const k = ang > 1e-5 ? Math.min(1, maxA / ang) : 1;
+
+  let nx = vx + (wx - vx) * k;
+  let ny = vy + (wy - vy) * k;
+  let nz = vz + (wz - vz) * k;
+  const nl = Math.hypot(nx, ny, nz);
+  if(nl < 1e-5) return;
+  nx /= nl; ny /= nl; nz /= nl;
+
+  const target = Math.min(m.speedMax, sp + m.accel * dt);
+  m.v[0] = nx * target; m.v[1] = ny * target; m.v[2] = nz * target;
+}
+
+/* 导弹命中：炸一下 + 本地判定伤害（远端伤害仍报给房主） */
+function missileBoom(p){
+  groundRing([p[0], groundH(p[0], p[2]), p[2]], 0.45, 5.2, 0.34, [2.4, 1.18, 0.46, 0.9]);
+  FLASHES.push({ p:[p[0], p[1]+0.15, p[2]], life:0.09, maxLife:0.09, size:1.0,
+                 seed:Math.random(), kind:1, col:[6.6, 4.4, 2.2, 1.0] });
+  FLASHES.push({ p:[p[0], p[1]+0.20, p[2]], life:0.24, maxLife:0.24, size:1.8,
+                 seed:Math.random(), kind:1, col:[4.6, 2.1, 0.75, 1.0] });
+  for(let i=0;i<18;i++){
+    if(SPARKS.length >= 420) break;
+    SPARKS.push({
+      p: [p[0]+rr(-0.4,0.4), p[1]+rr(-0.2,0.6), p[2]+rr(-0.4,0.4)],
+      v: [rr(-1,1)*9.0, rr(-0.2,1)*10.0, rr(-1,1)*9.0],
+      life: rr(0.22,0.75), size: rr(0.03,0.11), hot: 1.0,
+    });
+  }
+  for(let i=0;i<9;i++){
+    SMOKES.push({
+      p: [p[0]+rr(-0.8,0.8), p[1]+rr(0,1.4), p[2]+rr(-0.8,0.8)],
+      v: [rr(-1.8,1.8), rr(1.0,3.4), rr(-1.8,1.8)],
+      life: rr(1.0,2.0), maxLife: 2.0, size: rr(0.8,1.6), seed: Math.random(),
+    });
+  }
+  LIGHTS.push({ p:[p[0], p[1]+0.8, p[2]], col:[1.0,0.55,0.22],
+                intensity: 8.0, life: 0.38, maxLife: 0.38 });
+  if(typeof sndBoom === 'function') sndBoom(p);
+}
+
+function missileImpact(m, p, hit){
+  m.alive = false;
+  if(hit && hit.target){
+    damageTarget(hit.target, m.dmg, p, simT, false);
+  } else if(hit && hit.slot != null && !m.ghost){
+    netAfterHit(hit.slot, m.dmg);
+    hitFlash = 1.0;
+  } else {
+    groundImpact(p);
+  }
+  missileBoom(p);
+}
+
+function stepMissile(m, dt, t){
+  const speed = Math.hypot(m.v[0], m.v[1], m.v[2]);
+  const n = Math.max(1, Math.min(28, Math.ceil(speed * dt / 2.0)));
+  const h = dt / n;
+  const p = m.p;
+
+  for(let k=0;k<n;k++){
+    const ax = p[0], ay = p[1], az = p[2];
+    p[0] += m.v[0]*h; p[1] += m.v[1]*h; p[2] += m.v[2]*h;
+
+    if(!m.ghost){
+      for(const tg of TARGETS){
+        if(tg.state !== 'up') continue;
+        const dx = tg.x - p[0], dz = tg.z - p[2];
+        if(dx*dx + dz*dz > 16.0) continue;
+        const ht = targetHit(tg, [ax,ay,az], p);
+        if(ht >= 0){
+          const ip = [ax + (p[0]-ax)*ht, ay + (p[1]-ay)*ht, az + (p[2]-az)*ht];
+          missileImpact(m, ip, { target: tg });
+          return false;
+        }
+      }
+
+      const rh = netRemoteHit([ax,ay,az], p);
+      if(rh){
+        missileImpact(m, rh.point, { slot: rh.slot });
+        return false;
+      }
+    }
+
+    if(MAP.ok && !m.ghost){
+      const bt = mapSegBox([ax, ay, az], p);
+      if(bt >= 0){
+        const ip = [ax + (p[0]-ax)*bt, ay + (p[1]-ay)*bt, az + (p[2]-az)*bt];
+        missileImpact(m, ip, null);
+        return false;
+      }
+    }
+
+    const gp = groundHitPoint([ax, ay, az], p);
+    if(gp){
+      if(m.ghost){
+        m.alive = false;
+        FLASHES.push({ p:[gp[0], gp[1]+0.2, gp[2]], life:0.12, maxLife:0.12,
+                       size:0.8, seed:Math.random(), kind:1, col:[3.0,1.5,0.6,1.0] });
+      } else {
+        missileImpact(m, gp, null);
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+function updateMissiles(t, dt){
+  for(let i = MISSILES.length - 1; i >= 0; i--){
+    const m = MISSILES[i];
+    m.t += dt;
+    m.traveled += Math.hypot(m.v[0], m.v[1], m.v[2]) * dt;
+
+    if(!m.ghost) missileGuide(m, dt);
+    else {
+      /* 远端视觉弹不做制导，只让它慢慢加到巡航速度 */
+      const sp = Math.hypot(m.v[0], m.v[1], m.v[2]) || 1;
+      const target = Math.min(m.speedMax || 500, sp + (m.accel || 300) * dt);
+      m.v[0] *= target / sp; m.v[1] *= target / sp; m.v[2] *= target / sp;
+    }
+
+    /* 尾烟：每 18 ms 一朵，连成一条白迹 */
+    m.smokeT -= dt;
+    if(m.smokeT <= 0 && SMOKES.length < 620){
+      m.smokeT = 0.018;
+      SMOKES.push({
+        p: [m.p[0], m.p[1], m.p[2]],
+        v: [rr(-0.18,0.18), rr(-0.05,0.22), rr(-0.18,0.18)],
+        life: rr(0.45,0.82), maxLife: 0.82, size: rr(0.14,0.26), seed: Math.random(),
+      });
+    }
+
+    if(!stepMissile(m, dt, t)){ MISSILES.splice(i, 1); continue; }
+    if(m.t > m.life || m.traveled > m.range){
+      m.alive = false;
+      if(!m.ghost){
+        FLASHES.push({ p:[m.p[0], m.p[1], m.p[2]], life:0.12, maxLife:0.12,
+                       size:0.7, seed:Math.random(), kind:0, col:[1.5,0.9,0.5,0.5] });
+      }
+      MISSILES.splice(i, 1);
+    }
+  }
 }
 
 /* ---------------- 命中反馈 ---------------- */
@@ -4582,6 +4944,13 @@ function stepShell(s, dt, t){
 /* ---------------- 弹道预报（HUD 用） ---------------- */
 const _trace = { p: [0,0,0], dist: 0, target: null, ok: false };
 function traceShot(){
+  /* 导弹是按准星制导的：落点直接用准星世界点，不画炮弹抛物线 */
+  if(WPN.kind === 'missile'){
+    _trace.p = aimP.slice();
+    _trace.dist = aimDist;
+    _trace.target = null; _trace.ok = true;
+    return _trace;
+  }
   buildMatrices();
   const dir = gunDirWorld();
   const p = gunMuzzleWorld(0).slice();
@@ -4804,23 +5173,51 @@ function mgGroundImpact(p){
 
 /* ---------------- 主更新 ---------------- */
 function updateCombat(t, dt){
-  // 换弹
-  if(weapon.reloading > 0){
-    weapon.reloading -= dt;
-    if(weapon.reloading <= 0){ weapon.reloading = 0; weapon.ammo = WPN.mag; sndClick(true); }
+  // 所有槽独立换弹（切走也继续装填）
+  for(let i=0;i<WSTATE.length;i++){
+    const st = WSTATE[i], cfg = WSLOTS[i];
+    if(st.reloading > 0){
+      st.reloading -= dt;
+      if(st.reloading <= 0){
+        st.reloading = 0; st.ammo = cfg.mag;
+        if(i === WSLOT) sndClick(true);
+      }
+    }
   }
 
-  // 扳机
-  const want = input.fire && !Q.has('nofire') && !NET.self.dead;
-  if(want && weapon.reloading <= 0 && weapon.ammo > 0 && t >= weapon.next){
-    fireShot(t);
-    weapon.ammo--;
-    weapon.next = t + 60 / WPN.rpm;
-    if(weapon.ammo <= 0){ weapon.reloading = WPN.reload; sndReload(); }
+  // 左键：当前槽（导弹槽不吃左键，统一用 Ctrl）
+  {
+    const cfg = WSLOTS[WSLOT], st = WSTATE[WSLOT];
+    const want = STARTED && input.fire && !Q.has('nofire') && !NET.self.dead
+                 && cfg && cfg.kind !== 'missile';
+    if(want && st.reloading <= 0 && st.ammo > 0 && t >= st.next){
+      fireGun(t, WSLOT);
+      st.ammo--;
+      st.next = t + 60 / cfg.rpm;
+      if(st.ammo <= 0){ st.reloading = cfg.reload; sndReload(); }
+    }
+  }
+
+  // Ctrl：导弹槽（不要求先切到该槽）
+  {
+    const mi = missileSlotIndex();
+    if(mi >= 0){
+      const cfg = WSLOTS[mi], st = WSTATE[mi];
+      const wantM = STARTED && input.missile && !Q.has('nofire') && !NET.self.dead;
+      if(wantM && st.reloading <= 0 && st.ammo > 0 && t >= st.next){
+        fireMissile(t, mi);
+        st.ammo--;
+        st.next = t + 60 / cfg.rpm;
+        if(st.ammo <= 0){ st.reloading = cfg.reload; sndReload(); }
+      }
+    }
   }
 
   // 车顶机枪（独立于主炮扳机）
   mgUpdate(t, dt);
+
+  // 导弹
+  updateMissiles(t, dt);
 
   // 炮弹
   for(let i = SHELLS.length - 1; i >= 0; i--){
@@ -4931,6 +5328,14 @@ function buildFX(){
   for(const s of SHELLS){
     if(s.tracer === false) continue;
     fxDot(s.p, s.mg ? 0.055 : 0.12, [3.5, 2.0, 0.9, 0.85]);
+  }
+
+  // 导弹：头部亮点 + 尾部一小团暖光
+  for(const m of MISSILES){
+    fxDot(m.p, 0.18, [3.6, 2.1, 0.95, 0.95]);
+    const sp = Math.hypot(m.v[0], m.v[1], m.v[2]) || 1;
+    fxDot([m.p[0]-m.v[0]/sp*0.45, m.p[1]-m.v[1]/sp*0.45, m.p[2]-m.v[2]/sp*0.45],
+          0.28, [2.6, 1.1, 0.35, 0.55]);
   }
 
   // 星芒 / 光晕 / 火球
@@ -5197,6 +5602,40 @@ function sndShot(p, own){
   og.gain.exponentialRampToValueAtTime(0.0012, t + 0.20);
   o.connect(og); og.connect(out);
   o.start(t); o.stop(t + 0.24);
+}
+
+/* 导弹发射：一小段扫频气流 + 低频推力感 */
+function sndMissile(p){
+  if(!AUDIO.ok) return;
+  const ctx = AUDIO.ctx, t = ctx.currentTime;
+  const out = audioBus(p, 0.40, 0.28);
+
+  const n = ctx.createBufferSource();
+  n.buffer = AUDIO.noise;
+  n.playbackRate.value = 0.8 + Math.random() * 0.2;
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.Q.value = 0.7;
+  bp.frequency.setValueAtTime(420, t);
+  bp.frequency.exponentialRampToValueAtTime(2600, t + 0.22);
+  bp.frequency.exponentialRampToValueAtTime(620, t + 0.78);
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(0.0001, t);
+  ng.gain.exponentialRampToValueAtTime(0.55, t + 0.03);
+  ng.gain.exponentialRampToValueAtTime(0.0012, t + 0.82);
+  n.connect(bp); bp.connect(ng); ng.connect(out);
+  n.start(t); n.stop(t + 0.86);
+
+  const o = ctx.createOscillator();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(120, t);
+  o.frequency.exponentialRampToValueAtTime(42, t + 0.18);
+  const og = ctx.createGain();
+  og.gain.setValueAtTime(0.0001, t);
+  og.gain.exponentialRampToValueAtTime(0.38, t + 0.006);
+  og.gain.exponentialRampToValueAtTime(0.0012, t + 0.30);
+  o.connect(og); og.connect(out);
+  o.start(t); o.stop(t + 0.32);
 }
 
 /* 命中装甲：几个非谐波正弦 + 一点破片噪声 = 金属被砸中的「叮」 */
@@ -5990,7 +6429,7 @@ const NO_LOCK   = Q.has('nolock');
 /* 触屏设备：不请求指针锁定，改用屏幕上的虚拟摇杆 / 按钮（?touch=1 可强制开启） */
 const TOUCH     = Q.has('touch') || ('ontouchstart' in window) || (matchMedia && matchMedia('(pointer:coarse)').matches);
 
-const input = { fire: false, sniper: false, mg: false, locked: false };
+const input = { fire: false, sniper: false, mg: false, missile: false, locked: false };
 
 /* ---- 定速巡航（E 前进 / Q 倒车，各三档，再按一次关闭） ---- */
 const CRUISE_FRAC = [0.30, 0.62, 1.00];   // 档位 → 油门比例
@@ -6062,12 +6501,14 @@ addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('keydown', e => {
   if(e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.sniper = true;
   else if(e.code === 'Space' || e.code === 'KeyF'){ input.mg = true; e.preventDefault(); }
+  else if(e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'KeyR') input.missile = true;
 });
 addEventListener('keyup', e => {
   if(e.code === 'ShiftLeft' || e.code === 'ShiftRight') input.sniper = false;
   else if(e.code === 'Space' || e.code === 'KeyF') input.mg = false;
+  else if(e.code === 'ControlLeft' || e.code === 'ControlRight' || e.code === 'KeyR') input.missile = false;
 });
-addEventListener('blur', () => { input.fire = false; input.sniper = false; input.mg = false; freeLook = false; });
+addEventListener('blur', () => { input.fire = false; input.sniper = false; input.mg = false; input.missile = false; freeLook = false; });
 
 /* E / Q 定速巡航，C 自由视角（只在战斗里生效，车库的 Q/E 换国家不受影响） */
 addEventListener('keydown', e => {
@@ -6076,6 +6517,10 @@ addEventListener('keydown', e => {
   else if(e.code === 'KeyQ' && !e.repeat){ cycleCruise(-1); e.preventDefault(); }
   else if(e.code === 'KeyC'){ freeLook = true; e.preventDefault(); }
   else if(e.code === 'KeyM' && !e.repeat){ audioToggle(); e.preventDefault(); }
+  else if(/^(Digit|Numpad)[1-3]$/.test(e.code) && !e.repeat){
+    selectWeaponSlot((+e.code.slice(-1)) - 1);
+    e.preventDefault();
+  }
 });
 addEventListener('keyup', e => {
   if(e.code === 'KeyC') freeLook = false;
@@ -6662,6 +7107,9 @@ const PHYS = {
   id: '', meta: null,
   mass: 19000, comH: 1.0, comZ: 0, halfW: 1.15,
   rEff: 0.3, anchorY: 0.3, Iyaw: 90000,
+  wheeled: false,                 // 轮式车：用 Rapier 自带转向/轮胎摩擦
+  steerL: 0, steerR: 0,           // 当前前轮转角（左/右侧，已平滑）
+  steerCur: 0,                    // 平滑中的平均前轮转角（rad）
   trackV: 0, steerSpd: 0, steerForce: 0,  // 履带目标速度 / 差速速度 / 差速推力
   stiff0: 0, comp0: 0, relax0: 0, maxF: 0, // 悬挂基础刚度/阻尼/最大力（渐进限位用）
   contacts: [],                    // { lx, lz, side }
@@ -6759,6 +7207,9 @@ function physSetupVehicle(){
   const V = (typeof VEH !== 'undefined' && VEH) ? VEH : (VEHICLES && VEHICLES.bmpt) || {};
   PHYS.meta = meta;
   PHYS.id = SELECTED_ID || '';
+  PHYS.wheeled = wheelDriveInfo(V, meta).wheeled;
+  PHYS.steerL = PHYS.steerR = 0;
+  PHYS.steerCur = 0;
 
   const trackW = (meta && meta.trackW) || TRACK_W || 2.3;
   PHYS.halfW = Math.max(0.7, trackW * 0.5);
@@ -6791,6 +7242,18 @@ function physSetupVehicle(){
     raw.push({ lx:  PHYS.halfW, lz: rz, side:  1 });
   }
   PHYS.contacts = raw;
+
+  /* ---- 轮式：标记转向轮 ----
+     steerAxles 为正 = 车头在 +Z，为负 = 车头在 -Z；每侧按 z 排序取前 N 个。 */
+  const steerAxles = Math.abs(wheelDriveInfo(V, meta).steerAxles || 0);
+  if(PHYS.wheeled && steerAxles > 0){
+    const dir = Math.sign(V.steerAxles) || 1;
+    for(const side of [-1, 1]){
+      const list = raw.filter(c => c.side === side)
+                       .sort((a, b) => (b.lz - a.lz) * dir);
+      for(let i = 0; i < list.length; i++) list[i].steer = i < steerAxles;
+    }
+  }
 
   /* ---- 尺寸 / 质量 / 质心 ---- */
   let bb = (meta && meta.bbox) || [[-1.7, 0, -3.0], [1.7, 2.6, 3.0]];
@@ -6870,8 +7333,15 @@ function physSetupVehicle(){
     veh.setWheelSuspensionRelaxation(i, relax);
     veh.setWheelMaxSuspensionTravel(i, PHYS_TRAVEL);
     veh.setWheelMaxSuspensionForce(i, maxF);
-    veh.setWheelFrictionSlip(i, 0.001);          // 关闭车身自带的轮胎摩擦
-    veh.setWheelSideFrictionStiffness(i, 0.0);   // 履带纵/横摩擦由下面 physTrackForces 算
+    if(PHYS.wheeled){
+      /* 轮式：交给 Rapier 自带轮胎摩擦；frictionSlip 限制最大吸附力，
+         sideFrictionStiffness 放大侧向摩擦。 */
+      veh.setWheelFrictionSlip(i, V.frictionSlip || 8.0);
+      veh.setWheelSideFrictionStiffness(i, V.sideFriction != null ? V.sideFriction : 1.0);
+    } else {
+      veh.setWheelFrictionSlip(i, 0.001);          // 关闭车身自带的轮胎摩擦
+      veh.setWheelSideFrictionStiffness(i, 0.0);   // 履带纵/横摩擦由下面 physTrackForces 算
+    }
   }
 
   PHYS.body = body;
@@ -6879,6 +7349,8 @@ function physSetupVehicle(){
   PHYS.ready = true;
   PHYS.accum = 0;
   PHYS.trackV = PHYS.steerSpd = PHYS.steerForce = 0;
+  PHYS.steerL = PHYS.steerR = 0;
+  PHYS.steerCur = 0;
 
   console.log(`  物理：${PHYS.id || '?'}  ${(PHYS.mass / 1000).toFixed(1)} t  ` +
               `Rapier 悬挂 ${N} 点  r=${PHYS.rEff.toFixed(2)} m  ` +
@@ -6978,6 +7450,8 @@ function physReset(){
   PHYS.accum = 0;
   PHYS.travelL = PHYS.travelR = 0;
   PHYS.trackV = PHYS.steerSpd = PHYS.steerForce = 0;
+  PHYS.steerL = PHYS.steerR = 0;
+  PHYS.steerCur = 0;
   physSnapPrev();
   physSync(1);
 }
@@ -7008,6 +7482,8 @@ function physHalt(){
     }
   }
   PHYS.trackV = PHYS.steerSpd = PHYS.steerForce = 0;
+  PHYS.steerL = PHYS.steerR = 0;
+  PHYS.steerCur = 0;
   physSnapPrev();
   physSync(1);
 }
@@ -7029,12 +7505,42 @@ function physDrive(dt, thr, str){
   const vT = thr >= 0 ? thr * maxS : thr * revS;
   const spdK = Math.min(1, Math.abs(vF) / Math.max(1, maxS));
 
-  /* 履带目标线速度（一阶滤波），以及左右履带的差速。
-     转向靠 physTrackForces 里把这些目标速度变成左右履带的纵向力，
-     再由地面摩擦/滑移让车体自己转，不直接改车体朝向。 */
-  PHYS.trackV += (vT - PHYS.trackV) * Math.min(1, dt * 7.0);
-  PHYS.steerForce = str * PHYS.mass * PHYS_STEER_F * (1 - 0.55 * spdK);
-  PHYS.steerSpd   = str * (V.turnRate || 2.2) * PHYS.halfW * (1 - 0.35 * spdK);
+  if(PHYS.wheeled){
+    /* 轮式：Rapier 自带转向 + 轮胎摩擦。
+       前轮转角随速度衰减；左右轮按 Ackermann 差一点。 */
+    const steerMax = V.steerMax || 0.7;
+    const steerDrop = V.steerDrop != null ? V.steerDrop : 0.4;
+    const target = str * steerMax * (1 - steerDrop * spdK);
+    /* 转角不能一步到位：打向目标用 steerRate，回正用 steerReturn（rad/s）。
+       物理和视觉共用这个平滑后的角度，所以轨迹也是逐渐建立的。 */
+    const rate = (Math.abs(target) > Math.abs(PHYS.steerCur) ? (V.steerRate || 2.0)
+                                                            : (V.steerReturn || 3.0)) * dt;
+    PHYS.steerCur += pc(target - PHYS.steerCur, -rate, rate);
+    const ack = V.ackermann != null ? V.ackermann : 0.10;
+    const sgn = PHYS.steerCur >= 0 ? 1 : -1;
+    PHYS.steerL = PHYS.steerCur * (1 + ack * sgn);
+    PHYS.steerR = PHYS.steerCur * (1 - ack * sgn);
+
+    /* 纵向：目标速度差 → 每个轮子的驱动力（负值 = 制动/倒车）。
+       Rapier 把 engineForce 当冲量（×dt）施加，吸附上限由 frictionSlip 限制。 */
+    const N = Math.max(1, PHYS.contacts.length);
+    const k = V.engineResponse || 6.0;
+    const maxF = PHYS.mass * (V.engineForce || 6.0) / N * 1.5;
+    const per = pc((vT - vF) * PHYS.mass / N * k, -maxF, maxF);
+    for(let i=0;i<PHYS.contacts.length;i++){
+      const c = PHYS.contacts[i];
+      PHYS.veh.setWheelEngineForce(i, per);
+      PHYS.veh.setWheelBrake(i, 0);
+      PHYS.veh.setWheelSteering(i, c.steer ? (c.lx > 0 ? PHYS.steerL : PHYS.steerR) : 0);
+    }
+  } else {
+    /* 履带目标线速度（一阶滤波），以及左右履带的差速。
+       转向靠 physTrackForces 里把这些目标速度变成左右履带的纵向力，
+       再由地面摩擦/滑移让车体自己转，不直接改车体朝向。 */
+    PHYS.trackV += (vT - PHYS.trackV) * Math.min(1, dt * 7.0);
+    PHYS.steerForce = str * PHYS.mass * PHYS_STEER_F * (1 - 0.55 * spdK);
+    PHYS.steerSpd   = str * (V.turnRate || 2.2) * PHYS.halfW * (1 - 0.35 * spdK);
+  }
 
   /* ---- 渐进限位（bump stop）----
      按上一物理步的压缩量调节每个轮的弹簧刚度：
@@ -7055,11 +7561,13 @@ function physDrive(dt, thr, str){
     PHYS.veh.setWheelSuspensionRelaxation(i, PHYS.relax0 * df);
   }
 
-  /* Rapier 车辆控制器只负责悬挂/射线；轮胎纵/横力在 physTrackForces 里算 */
-  for(let i = 0; i < PHYS.contacts.length; i++){
-    PHYS.veh.setWheelEngineForce(i, 0);
-    PHYS.veh.setWheelBrake(i, 0);
-    PHYS.veh.setWheelSteering(i, 0);
+  /* 履带：Rapier 车辆控制器只负责悬挂/射线；轮胎纵/横力在 physTrackForces 里算 */
+  if(!PHYS.wheeled){
+    for(let i = 0; i < PHYS.contacts.length; i++){
+      PHYS.veh.setWheelEngineForce(i, 0);
+      PHYS.veh.setWheelBrake(i, 0);
+      PHYS.veh.setWheelSteering(i, 0);
+    }
   }
 }
 
@@ -7162,7 +7670,7 @@ function physStep(dt, thr, str){
     physSnapPrev();
     physDrive(PHYS_DT, thr, str);
     PHYS.veh.updateVehicle(PHYS_DT, RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC);
-    physTrackForces(PHYS_DT);
+    if(!PHYS.wheeled) physTrackForces(PHYS_DT);   // 轮式由 Rapier 轮胎摩擦驱动
     PHYS.world.step();
     PHYS.accum -= PHYS_DT;
     steps++;
@@ -7171,10 +7679,14 @@ function physStep(dt, thr, str){
 
   physSync(PHYS.accum / PHYS_DT);
 
-  /* 履带视觉行程：按左右履带的目标线速度积分。
-     原地转向时两侧反向；履带先动，车体靠差速推力/地面摩擦跟着转。 */
-  PHYS.travelL += (PHYS.trackV - PHYS.steerSpd) * dt;
-  PHYS.travelR += (PHYS.trackV + PHYS.steerSpd) * dt;
+  /* 视觉行程：履带按目标线速度积分；轮式按实际左右轮速积分。 */
+  if(PHYS.wheeled){
+    PHYS.travelL += car.vL * dt;
+    PHYS.travelR += car.vR * dt;
+  } else {
+    PHYS.travelL += (PHYS.trackV - PHYS.steerSpd) * dt;
+    PHYS.travelR += (PHYS.trackV + PHYS.steerSpd) * dt;
+  }
   car.travelL = PHYS.travelL;
   car.travelR = PHYS.travelR;
 }
@@ -7684,7 +8196,7 @@ let vehM, turretM, gunM, mgM;
 
 /* 任意一辆车的矩阵（本地车 / 远端玩家共用）
    mp/my/mpi = 车顶机枪转轴（炮塔坐标系）+ 相对偏航 / 俯仰；不给就锁在炮塔上 */
-function entityMats(pos, yaw, pitch, roll, turret, gun, tp, pg, mp, my, mpi){
+function entityMats(pos, yaw, pitch, roll, turret, gun, tp, pg, mp, my, mpi, steerL, steerR){
   const vm = M4.mul(M4.mul(M4.translate(pos[0], pos[1], pos[2]), M4.rotY(yaw)),
                     M4.mul(M4.rotX(pitch || 0), M4.rotZ(roll || 0)));
   const tm = M4.mul(M4.mul(vm, M4.mul(M4.translate(tp[0],tp[1],tp[2]), M4.rotY(turret))),
@@ -7697,13 +8209,15 @@ function entityMats(pos, yaw, pitch, roll, turret, gun, tp, pg, mp, my, mpi){
            M4.translate(mp[0],mp[1],mp[2])), M4.rotY(my || 0)),
            M4.rotX(-(mpi || 0))), M4.translate(-mp[0],-mp[1],-mp[2]));
   }
-  return { vehM: vm, turretM: tm, gunM: gm, mgM: mm };
+  return { vehM: vm, turretM: tm, gunM: gm, mgM: mm,
+           steerL: steerL || 0, steerR: steerR || 0 };
 }
 
 function buildMatrices(){
   const m = entityMats(car.pos, car.yaw, car.pitch, car.roll,
                        car.turret, car.gun, PIVOT_TURRET, PIVOT_GUN,
-                       PIVOT_MG, MG ? mg.yaw : 0, MG ? mg.pitch : 0);
+                       PIVOT_MG, MG ? mg.yaw : 0, MG ? mg.pitch : 0,
+                       PHYS.steerL || 0, PHYS.steerR || 0);
   vehM = m.vehM; turretM = m.turretM; gunM = m.gunM; mgM = m.mgM;
 }
 
@@ -7743,6 +8257,20 @@ const elMGRow     = document.getElementById('mgrow');
 const elMGCal     = document.getElementById('mgcal');
 const elMGHeat    = document.querySelector('#mgheat u');
 const elTmgBtn    = document.getElementById('tmg');
+const elSlots     = document.getElementById('wslots');
+let slotEls = [];
+function rebuildWeaponSlots(){
+  if(!elSlots) return;
+  elSlots.innerHTML = '';
+  slotEls = WSLOTS.map((w, i) => {
+    const s = document.createElement('span');
+    s.dataset.i = String(i);
+    elSlots.appendChild(s);
+    return s;
+  });
+  elSlots.hidden = WSLOTS.length < 2;
+  WSLOT_DIRTY = false;
+}
 if(BENCH) benchEl.style.display = 'block';
 
 /* ---- 顶部罗盘：先铺一条 -180°..540° 的刻度带，按相机朝向平移 ---- */
@@ -7939,7 +8467,8 @@ function useTrackProgram(pr){
 function drawVehicle(pr, trackPr){
   if(NET.self.dead) return;            // 阵亡：车已经炸了，等重生再画
   if(USE_MODEL){
-    const mats = { vehM, turretM, gunM, mgM };
+    const mats = { vehM, turretM, gunM, mgM,
+                   steerL: PHYS.steerL || 0, steerR: PHYS.steerR || 0 };
     if(pr === pDepth) drawModelDepth(MODEL, mats, car.travelL, car.travelR);
     else              drawModelScene(MODEL, mats, car.travelL, car.travelR, TRACK_DIR);
     return;
@@ -8731,6 +9260,18 @@ function updateHUD(now){
   }
 
   // 弹药 / 击杀
+  if(WSLOT_DIRTY) rebuildWeaponSlots();
+  if(elSlots && slotEls.length){
+    for(let i=0;i<WSLOTS.length;i++){
+      const w = WSLOTS[i], st = WSTATE[i], el = slotEls[i];
+      if(!el) continue;
+      const ammo = w.kind === 'missile'
+        ? (st.reloading > 0 ? ' 装填…' : ' ×' + st.ammo)
+        : '';
+      el.textContent = (i + 1) + ' ' + (w.short || w.name || '') + ammo;
+      el.classList.toggle('on', i === WSLOT);
+    }
+  }
   if(hudAmmo) hudAmmo.textContent = String(weapon.ammo);
   if(elReload){
     const rl = Math.max(0.001, WPN.reload || 1);
@@ -8740,9 +9281,12 @@ function updateHUD(now){
   if(elAmmoMeta){
     elAmmoMeta.textContent = weapon.reloading > 0
       ? '换弹 ' + weapon.reloading.toFixed(1) + ' s'
-      : (WPN.short || '') + ' · 待发';
+      : (WPN.short || '') + (WPN.kind === 'missile' ? ' · Ctrl/R 发射' : ' · 待发');
   }
-  if(ammoBox) ammoBox.classList.toggle('reloading', weapon.reloading > 0);
+  if(ammoBox){
+    ammoBox.classList.toggle('reloading', weapon.reloading > 0);
+    ammoBox.classList.toggle('missile', WPN.kind === 'missile');
+  }
 
   // 车顶机枪：口径 + 过热条（没有机枪的车整行隐藏）
   if(elMGRow){
@@ -9000,7 +9544,10 @@ function selectVehicle(id){
     `<em>${ERA_LABEL[V.era] || '—'}</em>` +
     `<em class="rl">${ROLE_LABEL[V.role] || '—'}</em>` +
     `<em>${NATIONS[V.nation].name}</em>`;
-  if(gweapEl)  gweapEl.textContent = V.weapon.name;
+  if(gweapEl){
+    const msl = (V.weapons || []).find(w => w.kind === 'missile');
+    gweapEl.textContent = V.weapon.name + (msl ? ' + ' + msl.name : '');
+  }
   if(gstatsEl) gstatsEl.innerHTML =
     vstat('机动', V.stat.spd) + vstat('火力', V.stat.fire) + vstat('防护', V.stat.armor);
   gdescEl.textContent = V.desc;
@@ -9129,6 +9676,7 @@ async function applyVehicle(id){
   SELECTED_ID = V.id;
   writeLast(V.id);
 
+  setWeaponSlots(V);                 // 1~3 个武器槽：主炮/机炮 + 导弹
   car.turret = 0;
   car.gun = 0;
   TURRET_MAX = (V.turretMax == null) ? null : V.turretMax;
@@ -9136,16 +9684,13 @@ async function applyVehicle(id){
   GUN_MIN = V.gunMin;
   GUN_MAX = V.gunMax;
 
-  WPN = Object.assign({}, V.weapon);
-  weapon.ammo = WPN.mag;
-  weapon.reloading = 0;
-  weapon.next = 0;
-  weapon.barrel = 0;
-
   const hn = document.getElementById('vhname');
   const hw = document.getElementById('vhwpn');
   if(hn) hn.textContent = V.name;
-  if(hw) hw.textContent = '· ' + V.weapon.short;
+  if(hw){
+    const hasMsl = (V.weapons || []).some(w => w.kind === 'missile');
+    hw.textContent = '· ' + V.weapon.short + (hasMsl ? ' + 导弹' : '');
+  }
   document.title = V.name + ' — 试验场';
 
   const my = ++selToken;
@@ -9244,12 +9789,13 @@ goEl.addEventListener('click', () => { netOpenLobby(); });   // 「进入测试�
       - 车型数据仍在同源 data/veh/<id>.js 里按需注入，不通过 DataChannel 传
       - 没联机时这段代码完全不碰网络，单人行为和以前一样
 
-    状态包 56 字节（小端）：
+    状态包 60 字节（小端）：
       0 u8 type=1 | 1 u8 slot | 2 u32 发送时刻
       6 f32 x | 10 f32 y | 14 f32 z
       18 f32 yaw | 22 f32 turret | 26 f32 gun
       30 f32 travelL | 34 f32 travelR | 38 u8 flags | 39 u8 ver
-      40 f32 mgYaw | 44 f32 mgPitch | 48 f32 pitch | 52 f32 roll        */
+      40 f32 mgYaw | 44 f32 mgPitch | 48 f32 pitch | 52 f32 roll
+      56 f32 steer（轮式前轮平均转角，履带车为 0）                          */
 
 const NET_PREFIX  = 'cdmyx-';
 const NET_MAX     = 4;          // 房间人数上限（含房主）
@@ -9414,6 +9960,18 @@ function netSegBox(a, b, lo, hi){
   return t0;
 }
 
+/* 远端车体的本地包围盒：优先用已加载模型的 bbox（高车/长车不会漏判），
+   但把炮管伸出去的长度裁掉，避免「打空气也算命中」。 */
+function netHitBox(e){
+  const bb = e && e.P && e.P.meta && e.P.meta.bbox;
+  if(!bb || !bb[0] || !bb[1]) return [[-1.62, 0.20, -3.25], [1.62, 2.95, 3.25]];
+  const hw = Math.min(2.05, Math.max(1.55, Math.abs(bb[0][0]), Math.abs(bb[1][0])));
+  return [
+    [-hw, Math.max(0.05, bb[0][1]), Math.max(-4.2, bb[0][2] + 0.2)],
+    [ hw, Math.min(6.2, bb[1][1]), Math.min( 4.2, bb[1][2] - 0.2)],
+  ];
+}
+
 /* 线段打在远端车上？用「本机看到的插值位置」判定，所见即所中 */
 function netRemoteHit(a, b){
   if(!NET.on || !STARTED || !REMOTES.size) return null;
@@ -9430,7 +9988,8 @@ function netRemoteHit(a, b){
     const c = Math.cos(s.yaw), sn = Math.sin(s.yaw);
     const p0 = [ (a[0]-s.x)*c - (a[2]-s.z)*sn, a[1], (a[0]-s.x)*sn + (a[2]-s.z)*c ];
     const p1 = [ (b[0]-s.x)*c - (b[2]-s.z)*sn, b[1], (b[0]-s.x)*sn + (b[2]-s.z)*c ];
-    const t = netSegBox(p0, p1, [-1.62, 0.20, -3.25], [1.62, 2.95, 3.25]);
+    const hb = netHitBox(e);
+    const t = netSegBox(p0, p1, hb[0], hb[1]);
     if(t >= 0 && (!best || t < best.t)){
       best = { slot: e.slot, t, point: [a[0]+dx*t, a[1]+dy*t, a[2]+dz*t] };
     }
@@ -9449,29 +10008,33 @@ function netAfterHit(slot, dmg){
 }
 
 /* 自己开火：让其他人也看到炮口焰和一条视觉弹道 */
-function netOnShot(mz, dir){
+function netOnShot(mz, dir, v0){
   if(!NET.on || !NET.started) return;
   const msg = { t: 'firefx', slot: NET.slot,
                 mz: [mz[0], mz[1], mz[2]], dir: [dir[0], dir[1], dir[2]] };
+  if(v0) msg.v0 = +v0;
   if(NET.role === 'host'){
     netBroadcast(msg);
   } else if(NET.hostConn && NET.hostConn.open){
-    try{ NET.hostConn.send({ t: 'fire', mz: msg.mz, dir: msg.dir }); }catch(e){}
+    try{ NET.hostConn.send({ t: 'fire', mz: msg.mz, dir: msg.dir, v0: msg.v0 }); }catch(e){}
   }
 }
 
 /* 别人的炮弹：只画，不结算（伤害由房主下发） */
-function netGhostShell(mz, dir){
+function netGhostShell(mz, dir, v0){
   if(!Array.isArray(mz) || !Array.isArray(dir)) return;
+  const sp = +v0 > 50 ? +v0 : WPN.v0;
   /* 远处别人的炮声：带距离衰减和左右声像 */
   if(typeof sndShot === 'function') sndShot(mz, false);
   SHELLS.push({
     p: [mz[0], mz[1], mz[2]],
     prev: [mz[0], mz[1], mz[2]],
-    v: [dir[0]*WPN.v0, dir[1]*WPN.v0, dir[2]*WPN.v0],
+    v: [dir[0]*sp, dir[1]*sp, dir[2]*sp],
     life: 2.5,
     alive: true,
     ghost: true,
+    dmg: 0,
+    g: 9.81,
   });
   FLASHES.push({
     p: [mz[0], mz[1], mz[2]], dir: dir.slice(), life: 0.085, maxLife: 0.085,
@@ -9490,6 +10053,38 @@ function netGhostShell(mz, dir){
     });
   }
   LIGHTS.push({ p: [mz[0], mz[1], mz[2]], col: [1.0, 0.55, 0.22], intensity: 5.0, life: 0.09, maxLife: 0.09 });
+}
+
+/* ---------------- 导弹视觉同步 ---------------- */
+/*  只同步发射点和方向；远端补一条纯视觉导弹（不制导、不结算伤害）。 */
+function netOnMissile(mz, dir){
+  if(!NET.on || !NET.started) return;
+  const msg = { t: 'mslfx', slot: NET.slot,
+                mz: [mz[0], mz[1], mz[2]], dir: [dir[0], dir[1], dir[2]] };
+  if(NET.role === 'host'){
+    netBroadcast(msg);
+  } else if(NET.hostConn && NET.hostConn.open){
+    try{ NET.hostConn.send({ t: 'msl', mz: msg.mz, dir: msg.dir }); }catch(e){}
+  }
+}
+
+function netGhostMissile(mz, dir){
+  if(!Array.isArray(mz) || !Array.isArray(dir)) return;
+  MISSILES.push({
+    p: [mz[0], mz[1], mz[2]],
+    v: [dir[0]*120, dir[1]*120, dir[2]*120],
+    dmg: 0, range: 3000,
+    speedMax: 500, accel: 300, turnRate: 0, boost: 0,
+    t: 0, traveled: 0, life: 12,
+    smokeT: 0, alive: true, ghost: true,
+  });
+  FLASHES.push({
+    p: [mz[0], mz[1], mz[2]], dir: dir.slice(), life: 0.10, maxLife: 0.10,
+    size: rr(0.6, 0.9), seed: Math.random(), kind: 1, col: [4.2, 2.8, 1.4, 1.0],
+  });
+  LIGHTS.push({ p: [mz[0], mz[1], mz[2]], col: [1.0, 0.62, 0.28], intensity: 5.0,
+                life: 0.14, maxLife: 0.14 });
+  if(typeof sndMissile === 'function') sndMissile(mz);
 }
 
 /* ---------------- 车顶机枪同步 ---------------- */
@@ -10021,8 +10616,18 @@ function netHostData(conn, d){
     if(!p) return;
     const mz = netVec3(d.mz), dir = netVec3(d.dir);
     if(!mz || !dir) return;
-    netBroadcast({ t: 'firefx', slot: p.slot, mz, dir }, conn.peer);
-    netGhostShell(mz, dir);
+    netBroadcast({ t: 'firefx', slot: p.slot, mz, dir, v0: d.v0 }, conn.peer);
+    netGhostShell(mz, dir, d.v0);
+    return;
+  }
+
+  if(d && d.t === 'msl'){
+    const p = NET.clients.get(conn.peer);
+    if(!p) return;
+    const mz = netVec3(d.mz), dir = netVec3(d.dir);
+    if(!mz || !dir) return;
+    netBroadcast({ t: 'mslfx', slot: p.slot, mz, dir }, conn.peer);
+    netGhostMissile(mz, dir);
     return;
   }
 
@@ -10438,7 +11043,12 @@ function netClientData(peer, d){
   }
   if(d && d.t === 'firefx'){
     const mz = netVec3(d.mz), dir = netVec3(d.dir);
-    if(mz && dir) netGhostShell(mz, dir);
+    if(mz && dir) netGhostShell(mz, dir, d.v0);
+    return;
+  }
+  if(d && d.t === 'mslfx'){
+    const mz = netVec3(d.mz), dir = netVec3(d.dir);
+    if(mz && dir) netGhostMissile(mz, dir);
     return;
   }
   if(d && d.t === 'mgfx'){
@@ -10471,7 +11081,7 @@ function netStartSending(){
 function netSendState(){
   if(!NET.on || !NET.started) return;
 
-  const b = new ArrayBuffer(56);
+  const b = new ArrayBuffer(60);
   const dv = new DataView(b);
   dv.setUint8(0, 1);
   dv.setUint8(1, NET.slot);
@@ -10488,6 +11098,7 @@ function netSendState(){
   dv.setFloat32(44, MG ? mg.pitch : 0, true);
   dv.setFloat32(48, car.pitch || 0, true);
   dv.setFloat32(52, car.roll || 0, true);
+  dv.setFloat32(56, (PHYS.steerL + PHYS.steerR) * 0.5 || 0, true);
   dv.setUint8(38, 1);
   dv.setUint8(39, 2);
 
@@ -10505,7 +11116,7 @@ function netDecode(dv, slot){
     x: dv.getFloat32(6, true), y: dv.getFloat32(10, true), z: dv.getFloat32(14, true),
     yaw: dv.getFloat32(18, true), turret: dv.getFloat32(22, true), gun: dv.getFloat32(26, true),
     travelL: dv.getFloat32(30, true), travelR: dv.getFloat32(34, true),
-    mgYaw: 0, mgPitch: 0, pitch: 0, roll: 0,
+    mgYaw: 0, mgPitch: 0, pitch: 0, roll: 0, steer: 0,
   };
   if(dv.byteLength >= 48){
     s.mgYaw   = dv.getFloat32(40, true);
@@ -10514,6 +11125,9 @@ function netDecode(dv, slot){
   if(dv.byteLength >= 56){
     s.pitch = dv.getFloat32(48, true);
     s.roll  = dv.getFloat32(52, true);
+  }
+  if(dv.byteLength >= 60){
+    s.steer = dv.getFloat32(56, true);
   }
   return s;
 }
@@ -10562,7 +11176,7 @@ function netApplySnap(s){
     yaw: s.yaw, turret: s.turret, gun: s.gun,
     travelL: s.travelL, travelR: s.travelR,
     mgYaw: s.mgYaw || 0, mgPitch: s.mgPitch || 0,
-    pitch: s.pitch || 0, roll: s.roll || 0,
+    pitch: s.pitch || 0, roll: s.roll || 0, steer: s.steer || 0,
   });
 
   netEnsureModel(e);
@@ -10635,7 +11249,7 @@ function netSample(e, rt){
     return { x: a.x, y: a.y, z: a.z, yaw: a.yaw, turret: a.turret, gun: a.gun,
              travelL: a.travelL, travelR: a.travelR,
              mgYaw: a.mgYaw || 0, mgPitch: a.mgPitch || 0,
-             pitch: a.pitch || 0, roll: a.roll || 0 };
+             pitch: a.pitch || 0, roll: a.roll || 0, steer: a.steer || 0 };
   }
   const u = Math.min(1, Math.max(0, (rt - a.rt) / (c.rt - a.rt)));
   return {
@@ -10651,6 +11265,7 @@ function netSample(e, rt){
     mgPitch: (a.mgPitch || 0) + ((c.mgPitch || 0) - (a.mgPitch || 0)) * u,
     pitch: (a.pitch || 0) + ((c.pitch || 0) - (a.pitch || 0)) * u,
     roll: (a.roll || 0) + ((c.roll || 0) - (a.roll || 0)) * u,
+    steer: (a.steer || 0) + ((c.steer || 0) - (a.steer || 0)) * u,
   };
 }
 
@@ -10675,7 +11290,8 @@ function drawRemotes(pr, trackPr){
     const mp = meta && meta.mgPivot;
     const V = VEHICLES[e.veh] || {};
     const mats = entityMats([s.x, s.y, s.z], s.yaw, s.pitch || 0, s.roll || 0, s.turret, s.gun, pt, pg,
-                            mp, s.mgYaw || 0, s.mgPitch || 0);
+                            mp, s.mgYaw || 0, s.mgPitch || 0,
+                            s.steer || 0, s.steer || 0);
 
     if(pr === pDepth) drawModelDepth(P, mats, s.travelL, s.travelR);
     else              drawModelScene(P, mats, s.travelL, s.travelR, V.trackDir || 1);
