@@ -2176,7 +2176,7 @@ const VDATA_KEEP = 6;              // 联机时可能同时有本地车 + 几个
 const VEH_SRC_LO  = 'data/veh_lo/';
 const VEH_SRC_RAW = 'data/veh/';
 /* 数据格式版本（meta.geoFmt 换代时改），让浏览器缓存失效 */
-const VEH_VER = '2551527e';
+const VEH_VER = 'da079f44';
 let VEH_SRC = (typeof Q !== 'undefined' && Q.get('tex') === 'lo') ? VEH_SRC_LO : VEH_SRC_RAW;
 /* http(s) 才能 fetch；file:// 双击仍然是 <script> 注入 */
 const CAN_FETCH = (typeof fetch === 'function') && /^https?:$/.test(location.protocol);
