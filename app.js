@@ -2603,10 +2603,13 @@ uniform mat4 uVP, uLightVPNear, uLightVPFar, uModel;
 uniform float uPosScale, uUvScale;
 uniform vec2 uUvShift;
 
-/* 履带按 z 方向的地形/悬挂偏移弯曲：uTrackP = (局部 z, 偏移) */
+/* 履带按 z 方向的地形/悬挂偏移弯曲：uTrackP = (局部 z, 偏移)
+   uTrackY0/Y1 = 该条履带网格的局部 y 范围（米）；形变按高度加权，
+   底部（着地那条）跟着轮子走，上沿固定在原处，不会顶进车体翼子板。*/
 uniform vec2 uTrackP[8];
 uniform int uTrackN;
 uniform float uTrackDeform;
+uniform float uTrackY0, uTrackY1;
 
 out vec3 vPos; out vec3 vNrm; out vec2 vUV; out vec3 vLocal; out vec4 vLightNear; out vec4 vLightFar;
 
@@ -2628,7 +2631,8 @@ float trackOffset(float z){
 
 void main(){
   vec3 lp = aPos * uPosScale;
-  lp.y += trackOffset(lp.z);
+  float tw = clamp((uTrackY1 - lp.y) / max(0.02, uTrackY1 - uTrackY0), 0.0, 1.0);
+  lp.y += trackOffset(lp.z) * tw;
   vec4 wp = uModel * vec4(lp, 1.0);
   vec3 wn = mat3(uModel) * aNrm;
   vPos = wp.xyz;
@@ -2761,6 +2765,7 @@ uniform float uPosScale;
 uniform vec2 uTrackP[8];
 uniform int uTrackN;
 uniform float uTrackDeform;
+uniform float uTrackY0, uTrackY1;
 float trackOffset(float z){
   if(uTrackDeform < 0.5 || uTrackN < 2) return 0.0;
   float y = uTrackP[0].y;
@@ -2778,7 +2783,8 @@ float trackOffset(float z){
 }
 void main(){
   vec3 lp = aPos * uPosScale;
-  lp.y += trackOffset(lp.z);
+  float tw = clamp((uTrackY1 - lp.y) / max(0.02, uTrackY1 - uTrackY0), 0.0, 1.0);
+  lp.y += trackOffset(lp.z) * tw;
   gl_Position = uLightVP * uModel * vec4(lp, 1.0);
 }`;
 
@@ -3002,6 +3008,44 @@ function modelExpandV2(M, raw, instB64){
   return { outV, outI };
 }
 
+/* 每条履带网格的局部 y 范围（米）。posView = { pos: Int16Array, stride, idx } */
+function modelTrackY(M, pv){
+  const out = {};
+  if(!pv || !pv.pos || !pv.idx) return out;
+  const S = M.posScale || 7000, sx = pv.stride, pos = pv.pos, idx = pv.idx;
+  for(const m of M.meshes){
+    if(m.part !== 'trackL' && m.part !== 'trackR') continue;
+    let y0 = Infinity, y1 = -Infinity;
+    for(let i = 0; i < m.count; i++){
+      const v = pos[idx[m.start + i] * sx + 1];
+      if(v < y0) y0 = v;
+      if(v > y1) y1 = v;
+    }
+    if(y0 <= y1) out[m.part] = [y0 / S, y1 / S];
+  }
+  return out;
+}
+
+/* 整车视觉抬升：把最低的着地面（履带底面）对到 y=0。
+   轮式车（没有履带）按轮胎底面算，2 cm 以内不动，避免改到本来就准的车。 */
+function modelLift(M, trackY){
+  let low = Infinity, tracked = false;
+  for(const k in trackY){
+    tracked = true;
+    if(trackY[k][0] < low) low = trackY[k][0];
+  }
+  if(!tracked){
+    for(const w of (M.wheels || [])){
+      if(!w || w.r < 0.15) continue;
+      const b = w.c[1] - w.r;
+      if(b < low) low = b;
+    }
+    if(!isFinite(low) || low > -0.02) return 0;
+  }
+  if(!isFinite(low)) return 0;
+  return Math.min(0.16, Math.max(0, -low));
+}
+
 /* data = { meta, tex, geo }；id 缺省用 meta.name。
    同一份数据重复调用直接复用，不会重复上传。 */
 function buildModel(data, id){
@@ -3027,11 +3071,14 @@ function buildModel(data, id){
 
   let bPos, bNrm, bUv, bIdx, bVert = null;
   let vStride = 0;
+  let posView = null;               // { pos: Int16Array, stride: 每顶点 Int16 个数, idx }
 
   if(M.v2){
     /* 原型 + 实例 → 展开（渲染路径和以前完全一样） */
     const ex = modelExpandV2(M, raw, data.inst);
     vStride = M.vStride || 16;
+    posView = { pos: new Int16Array(ex.outV.buffer, 0, ex.outV.byteLength >> 1),
+                stride: vStride >> 1, idx: ex.outI };
     bVert = mk(gl.ARRAY_BUFFER, ex.outV);
     bIdx  = mk(gl.ELEMENT_ARRAY_BUFFER, ex.outI);
   } else if(M.geoFmt === 'meshopt'){
@@ -3045,6 +3092,8 @@ function buildModel(data, id){
     const ibuf = new Uint8Array(nI * 4);
     MeshoptDecoder.decodeIndexBuffer(ibuf, nI, 4,
       raw.subarray(off.idx, off.idx + M.iLen));
+    posView = { pos: new Int16Array(vbuf.buffer, 0, vbuf.byteLength >> 1),
+                stride: vStride >> 1, idx: new Uint32Array(ibuf.buffer) };
     bVert = mk(gl.ARRAY_BUFFER, vbuf);
     bIdx  = mk(gl.ELEMENT_ARRAY_BUFFER, ibuf);
   } else {
@@ -3053,6 +3102,7 @@ function buildModel(data, id){
     const nrm = new Int8Array (raw.buffer, raw.byteOffset + off.nrm, nV * 3);
     const uv  = new Int16Array(raw.buffer, raw.byteOffset + off.uv,  nV * 2);
     const idx = new Uint32Array(raw.buffer, raw.byteOffset + off.idx, nI);
+    posView = { pos, stride: 3, idx };
     bPos = mk(gl.ARRAY_BUFFER, pos);
     bNrm = mk(gl.ARRAY_BUFFER, nrm);
     bUv  = mk(gl.ARRAY_BUFFER, uv);
@@ -3087,6 +3137,12 @@ function buildModel(data, id){
   P.meta = M;
   P.data = data;
   P.ready = true;
+
+  /* 履带网格的局部 y 范围（米）+ 整车抬升量：
+     原生模型原点≈地面，但履带底面比原点低 1~11 cm，平地上就插进地里。
+     抬升只作用于车体/炮塔/履带（轮子不动），履带形变按高度加权。 */
+  P.trackY = modelTrackY(M, posView);
+  P.lift = modelLift(M, P.trackY);
 
   /* 轮式转向轮标记：每侧按 z 排序取前 steerAxles 个（履带车为 null） */
   P.wheelSteer = null;
@@ -3230,8 +3286,19 @@ const MODEL_VEH = { parts: [], wheels: [], tracks: [], pathTex: null,
                     pathLen: 1, pathErr: 0, P: BMPT, model: USE_MODEL };
 
 /* ============================ 每部件矩阵 ============================ */
-/* mats = { vehM, turretM, gunM }；travel 来自各自的车（本地或远端）。 */
+/* mats = { vehM, turretM, gunM }；travel 来自各自的车（本地或远端）。
+   P.lift：整车视觉抬升（履带底面贴地）。所有部件一起抬，内部相对关系不变；
+   轮子的悬挂行程仍按未抬升的 vehM 算，所以在哪都一样贴地。 */
 function modelPartMat(part, P, mats, travelL, travelR){
+  const m = modelPartMat0(part, P, mats, travelL, travelR);
+  const L = P.lift;
+  if(!L) return m;
+  const vm = mats.vehM;                      // 上方向 = 世界里的车体 +Y
+  const up = M4.translate(vm[1] * L, vm[5] * L, vm[9] * L);
+  return M4.mul(up, m);
+}
+
+function modelPartMat0(part, P, mats, travelL, travelR){
   if(part === 'turret') return mats.turretM;
   if(part === 'gun')    return mats.gunM;
   if(part === 'mg')     return mats.mgM || mats.turretM;
@@ -3367,6 +3434,11 @@ function drawModelScene(P, mats, travelL, travelR, trackDir){
       if(U.uTrackP) gl.uniform2fv(U.uTrackP, _trackP);
       if(U.uTrackN) gl.uniform1i(U.uTrackN, n);
       if(U.uTrackDeform) gl.uniform1f(U.uTrackDeform, 1);
+      const ty = P.trackY && P.trackY[m.part];
+      if(ty){
+        if(U.uTrackY0) gl.uniform1f(U.uTrackY0, ty[0]);
+        if(U.uTrackY1) gl.uniform1f(U.uTrackY1, ty[1]);
+      }
     }else if(U.uTrackDeform){
       gl.uniform1f(U.uTrackDeform, 0);
     }
@@ -3412,6 +3484,11 @@ function drawModelDepth(P, mats, travelL, travelR){
       if(U.uTrackP) gl.uniform2fv(U.uTrackP, _trackP);
       if(U.uTrackN) gl.uniform1i(U.uTrackN, n);
       if(U.uTrackDeform) gl.uniform1f(U.uTrackDeform, 1);
+      const ty = P.trackY && P.trackY[m.part];
+      if(ty){
+        if(U.uTrackY0) gl.uniform1f(U.uTrackY0, ty[0]);
+        if(U.uTrackY1) gl.uniform1f(U.uTrackY1, ty[1]);
+      }
     }else if(U.uTrackDeform){
       gl.uniform1f(U.uTrackDeform, 0);
     }
