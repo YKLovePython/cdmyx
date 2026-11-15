@@ -2631,7 +2631,9 @@ float trackOffset(float z){
 
 void main(){
   vec3 lp = aPos * uPosScale;
-  float tw = clamp((uTrackY1 - lp.y) / max(0.02, uTrackY1 - uTrackY0), 0.0, 1.0);
+  /* 只有上部 45% 逐渐脱离形变：下跑面/负重轮接触区完全跟轮子，
+     回程上沿和翼子板附近固定，避免履带上沿顶穿车体 */
+  float tw = clamp((uTrackY1 - lp.y) / max(0.02, 0.45 * (uTrackY1 - uTrackY0)), 0.0, 1.0);
   lp.y += trackOffset(lp.z) * tw;
   vec4 wp = uModel * vec4(lp, 1.0);
   vec3 wn = mat3(uModel) * aNrm;
@@ -2783,7 +2785,7 @@ float trackOffset(float z){
 }
 void main(){
   vec3 lp = aPos * uPosScale;
-  float tw = clamp((uTrackY1 - lp.y) / max(0.02, uTrackY1 - uTrackY0), 0.0, 1.0);
+  float tw = clamp((uTrackY1 - lp.y) / max(0.02, 0.45 * (uTrackY1 - uTrackY0)), 0.0, 1.0);
   lp.y += trackOffset(lp.z) * tw;
   gl_Position = uLightVP * uModel * vec4(lp, 1.0);
 }`;
